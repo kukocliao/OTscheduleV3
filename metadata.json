@@ -1,0 +1,6 @@
+{
+  "name": "職能治療排程管理系統",
+  "description": "臨床復健科專屬，支持四大定制排班佇列、手動覆寫偏好以及自動媒合決策支援的網頁排班系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
