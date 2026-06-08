@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Calendar, 
   Users, 
@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
+import { db, FIREBASE_CONFIGURED } from './firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 // --- Custom Fixed Therapist Sequences based on user specification ---
 export const ROTATION_SEQUENCES: Record<string, string[]> = {
@@ -223,6 +225,73 @@ export default function App() {
       });
     });
   }, [leaves]);
+
+  // --- Firebase Real-time Sync ---
+  const isFromFirebase = useRef(false);
+  const firebaseReady = useRef(!FIREBASE_CONFIGURED); // true immediately if Firebase not configured
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'offline' | 'syncing' | 'synced' | 'error'>(
+    FIREBASE_CONFIGURED ? 'syncing' : 'offline'
+  );
+
+  // Listen for Firestore remote state changes
+  useEffect(() => {
+    if (!FIREBASE_CONFIGURED || !db) return;
+    const docRef = doc(db, 'scheduleApp', 'sharedState');
+    const unsub = onSnapshot(docRef, (snap) => {
+      if (!snap.exists()) {
+        // No remote data yet — mark ready so we push local state up
+        firebaseReady.current = true;
+        setSyncStatus('synced');
+        return;
+      }
+      const data = snap.data();
+      isFromFirebase.current = true;
+      if (Array.isArray(data.patients)) setPatients(data.patients);
+      if (Array.isArray(data.therapists)) setTherapists(data.therapists);
+      if (Array.isArray(data.leaves)) setLeaves(data.leaves);
+      if (Array.isArray(data.scheduleCells)) {
+        setScheduleCells(data.scheduleCells.map((c: any) => ({
+          ...c, isBlockedByLeave: false, isSystemBlocked: false
+        })));
+      }
+      if (Array.isArray(data.therapistOrder)) setTherapistOrder(data.therapistOrder);
+      if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
+      if (data.rotationIndices) setRotationIndices(data.rotationIndices);
+      if (data.adminPassword !== undefined) {
+        setAdminPassword(data.adminPassword || null);
+        if (data.adminPassword) localStorage.setItem('admin_pwd_hash', data.adminPassword);
+        else localStorage.removeItem('admin_pwd_hash');
+      }
+      firebaseReady.current = true;
+      setSyncStatus('synced');
+      setTimeout(() => { isFromFirebase.current = false; }, 300);
+    }, () => {
+      setSyncStatus('error');
+    });
+    return () => unsub();
+  }, []);
+
+  // Push local state changes to Firestore (debounced 1.5s)
+  useEffect(() => {
+    if (!FIREBASE_CONFIGURED || !db || !firebaseReady.current || isFromFirebase.current) return;
+    setSyncStatus('syncing');
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(async () => {
+      if (isFromFirebase.current || !db) return;
+      try {
+        await setDoc(doc(db, 'scheduleApp', 'sharedState'), {
+          patients, therapists, leaves, scheduleCells,
+          therapistOrder, nextRotationIndex, rotationIndices,
+          adminPassword: adminPassword || null,
+          lastUpdated: new Date().toISOString()
+        });
+        setSyncStatus('synced');
+      } catch {
+        setSyncStatus('error');
+      }
+    }, 1500);
+  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, adminPassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -1762,11 +1831,29 @@ export default function App() {
               <Calendar className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-slate-800 tracking-tight">職能治療排程管理系統</h1>
                 <span className="bg-indigo-50 text-indigo-700 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-indigo-100">
                   前台書記 + 後台管理
                 </span>
+                {FIREBASE_CONFIGURED ? (
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                    syncStatus === 'synced' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                    syncStatus === 'syncing' ? 'bg-sky-50 text-sky-700 border-sky-200' :
+                    'bg-rose-50 text-rose-700 border-rose-200'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                      syncStatus === 'synced' ? 'bg-emerald-500' :
+                      syncStatus === 'syncing' ? 'bg-sky-500 animate-pulse' :
+                      'bg-rose-500'
+                    }`} />
+                    {syncStatus === 'synced' ? '☁️ 雲端同步' : syncStatus === 'syncing' ? '同步中...' : '⚠️ 同步失敗'}
+                  </span>
+                ) : (
+                  <span className="bg-amber-50 text-amber-700 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-200">
+                    本機模式
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500">
                 符合「公平輪替 (Round-Robin)」與「複雜型個案佔雙格 (Double-Slot Weights)」演算法
