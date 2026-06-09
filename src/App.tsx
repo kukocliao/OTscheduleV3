@@ -33,11 +33,12 @@ import { db, FIREBASE_CONFIGURED } from './firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 // --- Custom Fixed Therapist Sequences based on user specification ---
-export const ROTATION_SEQUENCES: Record<string, string[]> = {
-  am_regular: ['t1', 't2', 't3', 't4', 't1', 't2', 't3', 't4', 't1', 't3', 't4'], // 趙長宥、潘亮全、姜壯坤、蘇柏臻、趙長宥、潘亮全、姜壯坤、蘇柏臻、趙長宥、姜壯坤、蘇柏臻
-  pm_regular: ['t1', 't5', 't3', 't4', 't1', 't5', 't3', 't4', 't1', 't3', 't4'], // 趙長宥、邱申棟、姜壯坤、蘇柏臻、趙長宥、邱申棟、姜壯坤、蘇柏臻、趙長宥、姜壯坤、蘇柏臻
-  am_splint: ['t1', 't2', 't3', 't4', 't1', 't4'], // 趙長宥、潘亮全、姜壯坤、蘇柏臻、趙長宥、蘇柏臻
-  pm_splint: ['t1', 't5', 't3', 't4', 't1', 't4']  // 趙長宥、邱申棟、姜壯坤、蘇柏臻、趙長宥、蘇柏臻
+// Default rotation sequences — overridden by localStorage/Firebase if configured
+export const DEFAULT_ROTATION_SEQUENCES: Record<string, string[]> = {
+  am_regular: ['t1', 't2', 't3', 't4', 't1', 't2', 't3', 't4', 't1', 't3', 't4'],
+  pm_regular: ['t1', 't5', 't3', 't4', 't1', 't5', 't3', 't4', 't1', 't3', 't4'],
+  am_splint:  ['t1', 't2', 't3', 't4', 't1', 't4'],
+  pm_splint:  ['t1', 't5', 't3', 't4', 't1', 't4'],
 };
 
 export default function App() {
@@ -113,6 +114,15 @@ export default function App() {
   const [editPatientTherapistId, setEditPatientTherapistId] = useState<string>('');
   const [editPatientScheduledDate, setEditPatientScheduledDate] = useState<string>('');
   
+  // Editable rotation sequences (persisted to localStorage + Firebase)
+  const [rotationSequences, setRotationSequences] = useState<Record<string, string[]>>(() => {
+    const saved = localStorage.getItem('app_rotation_sequences');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    }
+    return DEFAULT_ROTATION_SEQUENCES;
+  });
+
   // Custom rotation pointers for the four queues, offset to start with different therapists
   const [rotationIndices, setRotationIndices] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem('app_rotation_indices');
@@ -120,9 +130,9 @@ export default function App() {
       try { return JSON.parse(saved); } catch (e) { console.error(e); }
     }
     return {
-      am_regular: 0, // Starts with 't1' (趙長宥)
-      pm_regular: 1, // Starts with 't5' (邱申棟)
-      am_splint: 2,  // Starts with 't3' (姜壯坤)
+      am_regular: 0,
+      pm_regular: 1,
+      am_splint: 2,
       pm_splint: 3   // Starts with 't4' (蘇柏臻)
     };
   });
@@ -199,6 +209,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('app_rotation_indices', JSON.stringify(rotationIndices));
+    localStorage.setItem('app_rotation_sequences', JSON.stringify(rotationSequences));
   }, [rotationIndices]);
 
   // Search keyword for patients lists
@@ -242,6 +253,7 @@ export default function App() {
         else if (e.key === 'app_therapist_order') setTherapistOrder(val);
         else if (e.key === 'app_next_rotation_index') setNextRotationIndex(val);
         else if (e.key === 'app_rotation_indices') setRotationIndices(val);
+        else if (e.key === 'app_rotation_sequences') setRotationSequences(val);
         else if (e.key === 'admin_pwd_hash') setAdminPassword(val || null);
       } catch {}
     };
@@ -281,6 +293,7 @@ export default function App() {
       if (Array.isArray(data.therapistOrder)) setTherapistOrder(data.therapistOrder);
       if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
       if (data.rotationIndices) setRotationIndices(data.rotationIndices);
+      if (data.rotationSequences) setRotationSequences(data.rotationSequences);
       if (data.adminPassword !== undefined) {
         setAdminPassword(data.adminPassword || null);
         if (data.adminPassword) localStorage.setItem('admin_pwd_hash', data.adminPassword);
@@ -305,7 +318,7 @@ export default function App() {
       try {
         await setDoc(doc(db, 'scheduleApp', 'sharedState'), {
           patients, therapists, leaves, scheduleCells,
-          therapistOrder, nextRotationIndex, rotationIndices,
+          therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
           adminPassword: adminPassword || null,
           lastUpdated: new Date().toISOString()
         });
@@ -314,7 +327,7 @@ export default function App() {
         setSyncStatus('error');
       }
     }, 1500);
-  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, adminPassword]);
+  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -381,7 +394,7 @@ export default function App() {
   });
 
   const getNextTherapistInSeq = (key: string) => {
-    const seq = ROTATION_SEQUENCES[key];
+    const seq = rotationSequences[key];
     const index = rotationIndices[key];
     if (!seq) return '無';
     const tId = seq[index];
@@ -1015,7 +1028,7 @@ export default function App() {
       const indexUsed = recommendedResult.seqIndexUsed;
       setRotationIndices(prev => ({
         ...prev,
-        [key]: (indexUsed + 1) % ROTATION_SEQUENCES[key].length
+        [key]: (indexUsed + 1) % rotationSequences[key].length
       }));
     } else {
       // Fallback fallback
@@ -2275,7 +2288,7 @@ export default function App() {
                       <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_regular')}</strong>
                     </div>
                     <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {ROTATION_SEQUENCES.am_regular.map((id, idx) => {
+                      {rotationSequences.am_regular.map((id, idx) => {
                         const name = therapists.find(t => t.id === id)?.name || id;
                         const isNext = rotationIndices.am_regular === idx;
                         return (
@@ -2294,7 +2307,7 @@ export default function App() {
                       <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_regular')}</strong>
                     </div>
                     <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {ROTATION_SEQUENCES.pm_regular.map((id, idx) => {
+                      {rotationSequences.pm_regular.map((id, idx) => {
                         const name = therapists.find(t => t.id === id)?.name || id;
                         const isNext = rotationIndices.pm_regular === idx;
                         return (
@@ -2313,7 +2326,7 @@ export default function App() {
                       <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_splint')}</strong>
                     </div>
                     <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {ROTATION_SEQUENCES.am_splint.map((id, idx) => {
+                      {rotationSequences.am_splint.map((id, idx) => {
                         const name = therapists.find(t => t.id === id)?.name || id;
                         const isNext = rotationIndices.am_splint === idx;
                         return (
@@ -2332,7 +2345,7 @@ export default function App() {
                       <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_splint')}</strong>
                     </div>
                     <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {ROTATION_SEQUENCES.pm_splint.map((id, idx) => {
+                      {rotationSequences.pm_splint.map((id, idx) => {
                         const name = therapists.find(t => t.id === id)?.name || id;
                         const isNext = rotationIndices.pm_splint === idx;
                         return (
@@ -3036,6 +3049,132 @@ export default function App() {
             </div>
 
           </div>
+
+          {/* 輪替序列編輯器 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-extrabold text-slate-800 text-base">輪替序列設定</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRotationSequences(DEFAULT_ROTATION_SEQUENCES);
+                  setNotif({ message: '輪替序列已還原為預設值', type: 'info' });
+                }}
+                className="text-xs text-slate-500 hover:text-rose-600 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+              >
+                還原預設
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-5 bg-slate-50 p-2.5 rounded border border-slate-100">
+              設定每個診別的治療師輪替順序。序列中可重複放入同一位治療師（代表分配較多診次）。點「＋加入」選擇治療師加到序列末端，點「×」移除，用上下箭頭調整順序。
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {([
+                { key: 'am_regular', label: '上午｜住院 / 門診 / 中常' },
+                { key: 'pm_regular', label: '下午｜住院 / 門診 / 中常' },
+                { key: 'am_splint',  label: '上午｜副木' },
+                { key: 'pm_splint',  label: '下午｜副木' },
+              ] as { key: string; label: string }[]).map(({ key, label }) => {
+                const seq = rotationSequences[key] || [];
+                return (
+                  <div key={key} className="border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div className="text-xs font-bold text-slate-700 mb-1">{label}</div>
+
+                    {/* 序列清單 */}
+                    <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                      {seq.length === 0 && (
+                        <p className="text-xs text-slate-400 italic text-center py-3">序列為空，請加入治療師</p>
+                      )}
+                      {seq.map((tid, idx) => {
+                        const t = therapists.find(th => th.id === tid);
+                        return (
+                          <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 font-mono font-bold text-[10px] flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="font-semibold text-slate-800">{t?.name ?? tid}</span>
+                              <span className="text-slate-400 font-mono">({t?.code ?? '?'})</span>
+                            </div>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => {
+                                  const next = [...seq];
+                                  [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                  setRotationSequences(prev => ({ ...prev, [key]: next }));
+                                }}
+                                className="p-1 rounded hover:bg-slate-200 disabled:opacity-20 cursor-pointer"
+                              >
+                                <ChevronUp className="w-3 h-3 text-slate-500" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === seq.length - 1}
+                                onClick={() => {
+                                  const next = [...seq];
+                                  [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+                                  setRotationSequences(prev => ({ ...prev, [key]: next }));
+                                }}
+                                className="p-1 rounded hover:bg-slate-200 disabled:opacity-20 cursor-pointer"
+                              >
+                                <ChevronDown className="w-3 h-3 text-slate-500" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = seq.filter((_, i) => i !== idx);
+                                  setRotationSequences(prev => ({ ...prev, [key]: next }));
+                                }}
+                                className="p-1 rounded hover:bg-rose-100 text-rose-500 cursor-pointer ml-0.5"
+                              >
+                                <span className="text-xs font-bold">×</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 加入治療師 */}
+                    <div className="flex gap-2 pt-1 border-t border-slate-100">
+                      <select
+                        id={`seq-add-${key}`}
+                        className="flex-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+                        defaultValue=""
+                      >
+                        <option value="" disabled>選擇治療師...</option>
+                        {therapists.filter(t => t.isActive).map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.code})</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sel = document.getElementById(`seq-add-${key}`) as HTMLSelectElement;
+                          if (!sel.value) return;
+                          setRotationSequences(prev => ({
+                            ...prev,
+                            [key]: [...(prev[key] || []), sel.value]
+                          }));
+                          sel.value = '';
+                        }}
+                        className="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition-colors cursor-pointer shrink-0"
+                      >
+                        ＋加入
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           </div>
         )}
 
