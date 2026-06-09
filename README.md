@@ -13,6 +13,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
 &nbsp;
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore-FFCA28?style=flat-square&logo=firebase)](https://firebase.google.com)
+&nbsp;
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey?style=flat-square)](https://creativecommons.org/licenses/by-nc/4.0/)
 
 [**🚀 立即體驗 Live Demo**](https://ot-schedule-v3.vercel.app) ｜ [設定教學](#-快速部署) ｜ [客製化治療師](#-客製化設定)
 

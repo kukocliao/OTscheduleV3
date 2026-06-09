@@ -3050,6 +3050,29 @@ export default function App() {
             <span className="hover:text-indigo-600 transition-colors">系統稽核紀錄</span>
           </div>
         </div>
+        <div className="max-w-7xl mx-auto px-4 mt-2 pt-2 border-t border-slate-100">
+          <p className="text-[10px] text-slate-400">
+            Powered by{' '}
+            <a
+              href="https://github.com/kukocliao/OTscheduleV3"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 hover:text-indigo-600 transition-colors font-medium"
+            >
+              OTscheduleV3
+            </a>
+            {' '}· Developed by{' '}
+            <a
+              href="https://github.com/kukocliao"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 hover:text-indigo-600 transition-colors font-medium"
+            >
+              kukocliao
+            </a>
+            {' '}· CC BY-NC 4.0
+          </p>
+        </div>
       </footer>
 
       {confirmDialog && confirmDialog.isOpen && (
