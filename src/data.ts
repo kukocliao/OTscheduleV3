@@ -1,12 +1,12 @@
 import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave } from './types';
 
-// Initial Therapist List based on the Excel sample
+// Initial Therapist List — 請替換為你們科室的治療師資料
 export const initialTherapists: Therapist[] = [
-  { id: 't1', name: '趙長宥', code: 'OT', color: 'emerald', isActive: true },
-  { id: 't2', name: '潘亮全', code: 'OU', color: 'blue', isActive: true },
-  { id: 't3', name: '姜壯坤', code: 'OV', color: 'indigo', isActive: true },
-  { id: 't4', name: '蘇柏臻', code: 'OB', color: 'purple', isActive: true },
-  { id: 't5', name: '邱申棟', code: 'OC', color: 'pink', isActive: true },
+  { id: 't1', name: '治療師A', code: 'OT', color: 'emerald', isActive: true },
+  { id: 't2', name: '治療師B', code: 'OU', color: 'blue',    isActive: true },
+  { id: 't3', name: '治療師C', code: 'OV', color: 'indigo',  isActive: true },
+  { id: 't4', name: '治療師D', code: 'OB', color: 'purple',  isActive: true },
+  { id: 't5', name: '治療師E', code: 'OC', color: 'pink',    isActive: true },
 ];
 
 // Initial Patients with diverse categories and details
