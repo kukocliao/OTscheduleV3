@@ -226,6 +226,29 @@ export default function App() {
     });
   }, [leaves]);
 
+  // --- Cross-tab sync via localStorage storage events (zero-token test mode) ---
+  useEffect(() => {
+    if (FIREBASE_CONFIGURED) return;
+    const handleStorage = (e: StorageEvent) => {
+      if (!e.key || e.newValue === null) return;
+      try {
+        const val = JSON.parse(e.newValue);
+        if (e.key === 'app_patients') setPatients(val);
+        else if (e.key === 'app_therapists') setTherapists(val);
+        else if (e.key === 'app_leaves') setLeaves(val);
+        else if (e.key === 'app_schedule_cells') setScheduleCells(
+          val.map((c: any) => ({ ...c, isBlockedByLeave: false, isSystemBlocked: false }))
+        );
+        else if (e.key === 'app_therapist_order') setTherapistOrder(val);
+        else if (e.key === 'app_next_rotation_index') setNextRotationIndex(val);
+        else if (e.key === 'app_rotation_indices') setRotationIndices(val);
+        else if (e.key === 'admin_pwd_hash') setAdminPassword(val || null);
+      } catch {}
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   // --- Firebase Real-time Sync ---
   const isFromFirebase = useRef(false);
   const firebaseReady = useRef(!FIREBASE_CONFIGURED); // true immediately if Firebase not configured
@@ -1850,8 +1873,9 @@ export default function App() {
                     {syncStatus === 'synced' ? '☁️ 雲端同步' : syncStatus === 'syncing' ? '同步中...' : '⚠️ 同步失敗'}
                   </span>
                 ) : (
-                  <span className="bg-amber-50 text-amber-700 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-200">
-                    本機模式
+                  <span className="bg-amber-50 text-amber-700 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                    分頁同步
                   </span>
                 )}
               </div>
