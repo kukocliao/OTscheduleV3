@@ -210,7 +210,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('app_rotation_indices', JSON.stringify(rotationIndices));
     localStorage.setItem('app_rotation_sequences', JSON.stringify(rotationSequences));
-  }, [rotationIndices]);
+  }, [rotationIndices, rotationSequences]);
 
   // Search keyword for patients lists
   const [patientSearch, setPatientSearch] = useState('');
@@ -884,9 +884,17 @@ export default function App() {
       ? (isMorning ? 'am_splint' : 'pm_splint')
       : (isMorning ? 'am_regular' : 'pm_regular');
 
-    const seq = ROTATION_SEQUENCES[seqKey];
+    const seq = rotationSequences[seqKey] ?? DEFAULT_ROTATION_SEQUENCES[seqKey];
     const startIndex = rotationIndices[seqKey];
     const N = seq.length;
+    if (N === 0) {
+      setRecommendedResult(null);
+      setNotif({
+        message: '⚠️ 此時段的輪替佇列是空的，請先到後台管理設定輪替序列！',
+        type: 'error'
+      });
+      return;
+    }
 
     // Dynamically expand schedule cells if any active therapist does not have a free slot
     let currentCells = [...scheduleCells];
