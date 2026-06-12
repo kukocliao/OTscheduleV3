@@ -41,6 +41,21 @@ export interface TherapistLeave {
   slots: string; // Description e.g., "整天", "上午", "下午"
 }
 
+// 換日歸檔的排班記錄（去正規化，不依賴 patients/therapists 現存資料）
+export interface ArchivedAssignment {
+  id: string;            // 唯一鍵：date-cellId-medicalId（防止重複歸檔）
+  date: string;          // 排程日期 YYYY-MM-DD
+  patientName: string;
+  medicalId: string;
+  category: PatientCategory;
+  urgency: 'HIGH' | 'MEDIUM' | 'LOW';
+  therapistId: string;
+  therapistCode: string;
+  therapistName: string;
+  slotIndex: number;     // <100 上午、>=100 下午
+  archivedAt: string;    // 歸檔時間 ISO
+}
+
 export interface LoggedSchedule {
   id: string;
   timestamp: string;

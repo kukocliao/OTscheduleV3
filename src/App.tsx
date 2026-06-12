@@ -27,7 +27,7 @@ import {
   RotateCcw,
   Lock
 } from 'lucide-react';
-import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule } from './types';
+import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
 import { db, FIREBASE_CONFIGURED } from './firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -82,6 +82,17 @@ export default function App() {
       } catch (e) { console.error(e); }
     }
     return generateInitialSchedule(initialTherapists);
+  });
+  // 換日歸檔的歷史排班記錄（月報表/CSV 的資料來源之一）
+  const [archivedAssignments, setArchivedAssignments] = useState<ArchivedAssignment[]>(() => {
+    const saved = localStorage.getItem('app_archived_assignments');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { console.error(e); }
+    }
+    return [];
   });
   const [therapistOrder, setTherapistOrder] = useState<string[]>(() => {
     const saved = localStorage.getItem('app_therapist_order');
@@ -200,6 +211,10 @@ export default function App() {
   }, [scheduleCells]);
 
   useEffect(() => {
+    localStorage.setItem('app_archived_assignments', JSON.stringify(archivedAssignments));
+  }, [archivedAssignments]);
+
+  useEffect(() => {
     localStorage.setItem('app_therapist_order', JSON.stringify(therapistOrder));
   }, [therapistOrder]);
 
@@ -250,6 +265,7 @@ export default function App() {
         else if (e.key === 'app_schedule_cells') setScheduleCells(
           val.map((c: any) => ({ ...c, isBlockedByLeave: false, isSystemBlocked: false }))
         );
+        else if (e.key === 'app_archived_assignments') setArchivedAssignments(val);
         else if (e.key === 'app_therapist_order') setTherapistOrder(val);
         else if (e.key === 'app_next_rotation_index') setNextRotationIndex(val);
         else if (e.key === 'app_rotation_indices') setRotationIndices(val);
@@ -290,6 +306,7 @@ export default function App() {
           ...c, isBlockedByLeave: false, isSystemBlocked: false
         })));
       }
+      if (Array.isArray(data.archivedAssignments)) setArchivedAssignments(data.archivedAssignments);
       if (Array.isArray(data.therapistOrder)) setTherapistOrder(data.therapistOrder);
       if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
       if (data.rotationIndices) setRotationIndices(data.rotationIndices);
@@ -317,7 +334,7 @@ export default function App() {
       if (isFromFirebase.current || !db) return;
       try {
         await setDoc(doc(db, 'scheduleApp', 'sharedState'), {
-          patients, therapists, leaves, scheduleCells,
+          patients, therapists, leaves, scheduleCells, archivedAssignments,
           therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
           adminPassword: adminPassword || null,
           lastUpdated: new Date().toISOString()
@@ -327,7 +344,7 @@ export default function App() {
         setSyncStatus('error');
       }
     }, 1500);
-  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword]);
+  }, [patients, therapists, leaves, scheduleCells, archivedAssignments, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -370,10 +387,18 @@ export default function App() {
         }
       }
     });
-    
+
+    // 歸檔記錄的月份也要列入（即使該月病人已從現行名單移除）
+    archivedAssignments.forEach(r => {
+      const m = r.date.substring(0, 7);
+      if (/^\d{4}-\d{2}$/.test(m) && m >= '2026-06') {
+        months.add(m);
+      }
+    });
+
     // Sort descending so latest is on top, then backwards in history
     return Array.from(months).sort((a, b) => b.localeCompare(a));
-  }, [patients]);
+  }, [patients, archivedAssignments]);
   const [recommendedResult, setRecommendedResult] = useState<{
     therapist: Therapist;
     cellIds: string[];
@@ -427,6 +452,92 @@ export default function App() {
   const therapistMap = useMemo(() => {
     return new Map<string, Therapist>(therapists.map(t => [t.id, t]));
   }, [therapists]);
+
+  // --- 自動換日歸檔 ---
+  // 每 10 分鐘更新一次「今天」的日期，讓跨夜未關閉的頁面也能觸發換日
+  const [currentDateStr, setCurrentDateStr] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateStr(new Date().toISOString().split('T')[0]);
+    }, 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 排程日期早於今天的格子 → 寫入歸檔記錄後清空格子（今日課表每天從 0 開始）
+  // 延遲 800ms 執行，避開 Firebase snapshot 寫入的 isFromFirebase 窗口
+  useEffect(() => {
+    const needsRollover = scheduleCells.some(c => {
+      if (!c.patientId) return false;
+      const d = patientMap.get(c.patientId)?.scheduledDate;
+      return !!d && d < currentDateStr;
+    });
+    if (!needsRollover) return;
+
+    const t = setTimeout(() => {
+      const toArchive: ArchivedAssignment[] = [];
+      const updatedCells = scheduleCells.map(c => {
+        const p = c.patientId ? patientMap.get(c.patientId) : null;
+        const d = p?.scheduledDate;
+        if (p && d && d < currentDateStr) {
+          const therapistObj = therapistMap.get(c.therapistId);
+          toArchive.push({
+            id: `${d}-${c.id}-${p.medicalId}`,
+            date: d,
+            patientName: p.name,
+            medicalId: p.medicalId,
+            category: c.category,
+            urgency: p.urgency,
+            therapistId: c.therapistId,
+            therapistCode: therapistObj?.code || '',
+            therapistName: therapistObj?.name || '未知',
+            slotIndex: c.slotIndex,
+            archivedAt: new Date().toISOString()
+          });
+          return { ...c, patientId: null };
+        }
+        return c;
+      });
+      if (toArchive.length === 0) return;
+
+      setArchivedAssignments(prev => {
+        const seen = new Set(prev.map(r => r.id));
+        return [...prev, ...toArchive.filter(r => !seen.has(r.id))];
+      });
+      setScheduleCells(updatedCells);
+      setNotif({
+        message: `📦 已自動換日：${toArchive.length} 筆過往排班已歸檔（報表資料完整保留），今日課表重新開始。`,
+        type: 'info'
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [scheduleCells, patientMap, therapistMap, currentDateStr]);
+
+  // 月報表資料 = 已歸檔的歷史記錄 + 目前課表格子上的記錄（兩者不重疊：歸檔時格子已清空）
+  const getRecordsForMonth = (month: string): ArchivedAssignment[] => {
+    const records: ArchivedAssignment[] = archivedAssignments.filter(r => r.date.startsWith(month));
+    scheduleCells.forEach(c => {
+      if (!c.patientId) return;
+      const p = patientMap.get(c.patientId);
+      if (!p) return;
+      const d = p.scheduledDate || '';
+      if (!d.startsWith(month)) return;
+      const therapistObj = therapistMap.get(c.therapistId);
+      records.push({
+        id: `${d}-${c.id}-${p.medicalId}`,
+        date: d,
+        patientName: p.name,
+        medicalId: p.medicalId,
+        category: c.category,
+        urgency: p.urgency,
+        therapistId: c.therapistId,
+        therapistCode: therapistObj?.code || '',
+        therapistName: therapistObj?.name || '未知',
+        slotIndex: c.slotIndex,
+        archivedAt: ''
+      });
+    });
+    return records;
+  };
 
   // Get current ordered list of therapists for Round Robin
   const sortedTherapistsInRotation = useMemo(() => {
@@ -1220,7 +1331,7 @@ export default function App() {
   const handleClearAllSchedule = () => {
     triggerConfirm(
       '確認空檔重設',
-      '確定要清空整個月的所有排班內容，將格子全部重設為可用狀態嗎？',
+      '確定要清空目前課表格子上的排班，將格子全部重設為可用狀態嗎？（已自動歸檔的歷史記錄與月報表不受影響）',
       () => {
         setScheduleCells(prev => prev.map(c => ({ ...c, patientId: null })));
         setSelectedPatientId(null);
@@ -1399,31 +1510,18 @@ export default function App() {
 
     csvContent += '個案類別,時段,治療師代碼,治療師姓名,個案名字,個案病歷號,緊急度,排程日期\r\n';
 
-    // Loop through categorization blocks
+    // 從「歸檔記錄 + 今日課表」取得本月所有排班，依類別、日期、診次排序輸出
     const categories: PatientCategory[] = ['INPATIENT', 'INPATIENT_COMPLEX', 'OUTPATIENT_COMPLEX', 'MODERATE', 'SPLINT'];
-    
-    categories.forEach(cat => {
-      const catCells = scheduleCells.filter(c => c.category === cat).sort((a,b) => a.slotIndex - b.slotIndex);
-      catCells.forEach(cell => {
-        if (cell.patientId) {
-          const therapyObj = therapistMap.get(cell.therapistId);
-          const patientObj = patientMap.get(cell.patientId);
-          const pScheduledDate = patientObj?.scheduledDate || '';
-          
-          // Filter lines written to CSV based on statsMonth
-          const matchesStatsMonth = pScheduledDate && pScheduledDate.startsWith(statsMonth);
-          if (matchesStatsMonth) {
-            const catName = getCategoryLabel(cat);
-            const periodName = cell.slotIndex < 100 ? '上午' : '下午';
-            const therapistCode = therapyObj?.code || '';
-            const therapistName = therapyObj?.name || '';
-            const pName = patientObj?.name || '';
-            const pMedId = patientObj?.medicalId || '';
-            const pUrgency = patientObj?.urgency || '';
+    const monthRecords = getRecordsForMonth(statsMonth);
 
-            csvContent += `"${catName}","${periodName}","${therapistCode}","${therapistName}","${pName}","${pMedId}","${pUrgency}","${pScheduledDate}"\r\n`;
-          }
-        }
+    categories.forEach(cat => {
+      const catRecords = monthRecords
+        .filter(r => r.category === cat)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.slotIndex - b.slotIndex);
+      catRecords.forEach(r => {
+        const catName = getCategoryLabel(cat);
+        const periodName = r.slotIndex < 100 ? '上午' : '下午';
+        csvContent += `"${catName}","${periodName}","${r.therapistCode}","${r.therapistName}","${r.patientName}","${r.medicalId}","${r.urgency}","${r.date}"\r\n`;
       });
     });
 
@@ -1432,40 +1530,17 @@ export default function App() {
     csvContent += '治療師姓名,職稱代號,中複病人佔用,住院複雜佔用 (佔用雙格),門診複雜診次 (佔用雙格),中度佔用,副木佔用,總計服務診次 (Slots Used),空檔未利用\r\n';
 
     therapists.forEach(t => {
-      const therapistAllCells = scheduleCells.filter(c => c.therapistId === t.id);
-      
-      const inpatientCount = therapistAllCells.filter(c => {
-        if (c.category !== 'INPATIENT' || !c.patientId) return false;
-        const p = patientMap.get(c.patientId);
-        return (p?.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06') === statsMonth;
-      }).length;
+      const tRecords = monthRecords.filter(r => r.therapistId === t.id);
+      const countByCat = (cat: PatientCategory) => tRecords.filter(r => r.category === cat).length;
 
-      const inpatientComplexCount = therapistAllCells.filter(c => {
-        if (c.category !== 'INPATIENT_COMPLEX' || !c.patientId) return false;
-        const p = patientMap.get(c.patientId);
-        return (p?.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06') === statsMonth;
-      }).length;
+      const inpatientCount = countByCat('INPATIENT');
+      const inpatientComplexCount = countByCat('INPATIENT_COMPLEX');
+      const outpatientComplexCells = countByCat('OUTPATIENT_COMPLEX');
+      const moderateCount = countByCat('MODERATE');
+      const splintCount = countByCat('SPLINT');
 
-      const outpatientComplexCells = therapistAllCells.filter(c => {
-        if (c.category !== 'OUTPATIENT_COMPLEX' || !c.patientId) return false;
-        const p = patientMap.get(c.patientId);
-        return (p?.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06') === statsMonth;
-      }).length;
-
-      const moderateCount = therapistAllCells.filter(c => {
-        if (c.category !== 'MODERATE' || !c.patientId) return false;
-        const p = patientMap.get(c.patientId);
-        return (p?.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06') === statsMonth;
-      }).length;
-
-      const splintCount = therapistAllCells.filter(c => {
-        if (c.category !== 'SPLINT' || !c.patientId) return false;
-        const p = patientMap.get(c.patientId);
-        return (p?.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06') === statsMonth;
-      }).length;
-      
       const totalUsedSlots = inpatientCount + inpatientComplexCount + outpatientComplexCells + moderateCount + splintCount;
-      const freeSlotsCount = therapistAllCells.filter(c => !c.patientId && !c.isSystemBlocked && !c.isBlockedByLeave).length;
+      const freeSlotsCount = scheduleCells.filter(c => c.therapistId === t.id && !c.patientId && !c.isSystemBlocked && !c.isBlockedByLeave).length;
 
       csvContent += `"${t.name}","${t.code}",${inpatientCount},${inpatientComplexCount},${outpatientComplexCells},${moderateCount},${splintCount},${totalUsedSlots},${freeSlotsCount}\r\n`;
     });
@@ -1524,6 +1599,9 @@ export default function App() {
           }
           return p;
         }));
+
+        // 同步刪除該月份的歸檔記錄（重置 = 該月服務量歸零）
+        setArchivedAssignments(prev => prev.filter(r => !r.date.startsWith(monthValue)));
 
         setNotif({
           message: `🔄 ${formattedMonth} 的所有人工作量已成功重置！當期服務量已歸零。`,
@@ -2660,17 +2738,11 @@ export default function App() {
                         {/* List of therapists for this specific month */}
                         <div className="space-y-3">
                           {therapists.map(t => {
-                            const allCells = scheduleCells.filter(c => c.therapistId === t.id);
-                            const total = allCells.length;
-                            
-                            // Filter counts per this currentM
-                            const occupied = allCells.filter(c => {
-                              if (!c.patientId) return false;
-                              const p = patientMap.get(c.patientId);
-                              if (!p) return false;
-                              const pMonth = p.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06';
-                              return pMonth === currentM;
-                            }).length;
+                            const total = scheduleCells.filter(c => c.therapistId === t.id).length;
+
+                            // 本月份服務量 = 歸檔記錄 + 今日課表（getRecordsForMonth 合併）
+                            const occupied = getRecordsForMonth(currentM)
+                              .filter(r => r.therapistId === t.id).length;
 
                             const occupiedWidth = total > 0 ? (occupied / total) * 100 : 0;
 
