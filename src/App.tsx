@@ -157,6 +157,14 @@ export default function App() {
   const [pwdSetupInput, setPwdSetupInput] = useState<string>('');
   const [pwdSetupConfirmInput, setPwdSetupConfirmInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
+
+  // Site-wide password gate
+  const [sitePassword, setSitePassword] = useState<string | null>(() => localStorage.getItem('app_site_pwd'));
+  const [isSiteAuthenticated, setIsSiteAuthenticated] = useState<boolean>(false);
+  const [sitePwdInput, setSitePwdInput] = useState<string>('');
+  const [sitePwdSetupInput, setSitePwdSetupInput] = useState<string>('');
+  const [sitePwdSetupConfirmInput, setSitePwdSetupConfirmInput] = useState<string>('');
+  const [siteLoginError, setSiteLoginError] = useState<string>('');
   
   // Notification logs for user activities (to keep UX interactive and responsive)
   const [notif, setNotif] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>({
@@ -316,6 +324,11 @@ export default function App() {
         if (data.adminPassword) localStorage.setItem('admin_pwd_hash', data.adminPassword);
         else localStorage.removeItem('admin_pwd_hash');
       }
+      if (data.sitePassword !== undefined) {
+        setSitePassword(data.sitePassword || null);
+        if (data.sitePassword) localStorage.setItem('app_site_pwd', data.sitePassword);
+        else localStorage.removeItem('app_site_pwd');
+      }
       firebaseReady.current = true;
       setSyncStatus('synced');
       setTimeout(() => { isFromFirebase.current = false; }, 300);
@@ -337,6 +350,7 @@ export default function App() {
           patients, therapists, leaves, scheduleCells, archivedAssignments,
           therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
           adminPassword: adminPassword || null,
+          sitePassword: sitePassword || null,
           lastUpdated: new Date().toISOString()
         });
         setSyncStatus('synced');
@@ -344,7 +358,7 @@ export default function App() {
         setSyncStatus('error');
       }
     }, 1500);
-  }, [patients, therapists, leaves, scheduleCells, archivedAssignments, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword]);
+  }, [patients, therapists, leaves, scheduleCells, archivedAssignments, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword, sitePassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -1632,6 +1646,29 @@ export default function App() {
 
 
 
+  const handleSetSitePassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sitePwdSetupInput.trim()) { setSiteLoginError('密碼不可為空！'); return; }
+    if (sitePwdSetupInput !== sitePwdSetupConfirmInput) { setSiteLoginError('兩次輸入的密碼不一致！'); return; }
+    localStorage.setItem('app_site_pwd', sitePwdSetupInput);
+    setSitePassword(sitePwdSetupInput);
+    setIsSiteAuthenticated(true);
+    setSitePwdSetupInput('');
+    setSitePwdSetupConfirmInput('');
+    setSiteLoginError('');
+  };
+
+  const handleVerifySitePassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sitePwdInput === sitePassword) {
+      setIsSiteAuthenticated(true);
+      setSitePwdInput('');
+      setSiteLoginError('');
+    } else {
+      setSiteLoginError('密碼錯誤，請重新輸入！');
+    }
+  };
+
   const handleSetAdminPassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pwdSetupInput.trim()) {
@@ -1941,9 +1978,76 @@ export default function App() {
     }
   }
 
+  // Site-wide password gate
+  if (!isSiteAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl p-8 shadow-md">
+          <div className="flex flex-col items-center text-center space-y-3 mb-6">
+            <div className="p-3 bg-indigo-50 rounded-full text-indigo-600">
+              <Lock className="w-8 h-8" />
+            </div>
+            <h2 className="text-lg font-extrabold text-slate-800">職能治療排程管理系統</h2>
+            <p className="text-xs text-slate-500">
+              {sitePassword ? '請輸入密碼以進入系統' : '首次使用，請設定系統密碼'}
+            </p>
+          </div>
+
+          {!sitePassword ? (
+            <form onSubmit={handleSetSitePassword} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">設定系統密碼</label>
+                <input
+                  type="password"
+                  value={sitePwdSetupInput}
+                  onChange={e => { setSitePwdSetupInput(e.target.value); setSiteLoginError(''); }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="請輸入密碼"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">確認密碼</label>
+                <input
+                  type="password"
+                  value={sitePwdSetupConfirmInput}
+                  onChange={e => { setSitePwdSetupConfirmInput(e.target.value); setSiteLoginError(''); }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="再次輸入密碼"
+                />
+              </div>
+              {siteLoginError && <p className="text-xs text-rose-600 font-semibold">{siteLoginError}</p>}
+              <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer">
+                設定並進入
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifySitePassword} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">系統密碼</label>
+                <input
+                  type="password"
+                  value={sitePwdInput}
+                  onChange={e => { setSitePwdInput(e.target.value); setSiteLoginError(''); }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="請輸入密碼"
+                  autoFocus
+                />
+              </div>
+              {siteLoginError && <p className="text-xs text-rose-600 font-semibold">{siteLoginError}</p>}
+              <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer">
+                進入系統
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col antialiased">
-      
+
       {/* Header Block with Clinic Logos */}
       <header id="main-header" className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -3128,6 +3232,45 @@ export default function App() {
 
             </div>
 
+          </div>
+
+          {/* 系統密碼管理 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+              <Lock className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-extrabold text-slate-800 text-base">系統密碼管理</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4 bg-slate-50 p-2.5 rounded border border-slate-100">
+              修改進入系統的密碼。變更後所有裝置須重新登入。
+            </p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const newPwd = (form.elements.namedItem('newSitePwd') as HTMLInputElement).value.trim();
+              const confirmPwd = (form.elements.namedItem('confirmSitePwd') as HTMLInputElement).value.trim();
+              if (!newPwd) { setNotif({ message: '密碼不可為空！', type: 'error' }); return; }
+              if (newPwd !== confirmPwd) { setNotif({ message: '兩次輸入的密碼不一致！', type: 'error' }); return; }
+              localStorage.setItem('app_site_pwd', newPwd);
+              setSitePassword(newPwd);
+              form.reset();
+              setNotif({ message: '系統密碼已更新！', type: 'success' });
+            }} className="flex flex-col sm:flex-row gap-3 max-w-md">
+              <input
+                name="newSitePwd"
+                type="password"
+                placeholder="新密碼"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <input
+                name="confirmSitePwd"
+                type="password"
+                placeholder="確認新密碼"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer shrink-0">
+                更新密碼
+              </button>
+            </form>
           </div>
 
           {/* 輪替序列編輯器 */}
