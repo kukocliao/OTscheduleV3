@@ -30,7 +30,7 @@ import {
 import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
 import { db, FIREBASE_CONFIGURED } from './firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, deleteField, deleteDoc } from 'firebase/firestore';
 
 // --- Custom Fixed Therapist Sequences based on user specification ---
 // Default rotation sequences — overridden by localStorage/Firebase if configured
@@ -83,17 +83,43 @@ export default function App() {
     }
     return generateInitialSchedule(initialTherapists);
   });
-  // 換日歸檔的歷史排班記錄（月報表/CSV 的資料來源之一）
-  const [archivedAssignments, setArchivedAssignments] = useState<ArchivedAssignment[]>(() => {
-    const saved = localStorage.getItem('app_archived_assignments');
-    if (saved) {
+  // 換日歸檔的歷史排班記錄，按月份分拆存放（月報表/CSV 的資料來源）
+  const [archiveByMonth, setArchiveByMonth] = useState<Record<string, ArchivedAssignment[]>>(() => {
+    const result: Record<string, ArchivedAssignment[]> = {};
+    // 一次性遷移舊版單一陣列格式
+    const oldSaved = localStorage.getItem('app_archived_assignments');
+    if (oldSaved) {
       try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        const parsed = JSON.parse(oldSaved) as ArchivedAssignment[];
+        if (Array.isArray(parsed)) {
+          parsed.forEach(r => {
+            const month = r.date.substring(0, 7);
+            if (!result[month]) result[month] = [];
+            result[month].push(r);
+          });
+          Object.entries(result).forEach(([m, records]) => {
+            localStorage.setItem(`app_archive_${m}`, JSON.stringify(records));
+          });
+          localStorage.removeItem('app_archived_assignments');
+        }
       } catch (e) { console.error(e); }
     }
-    return [];
+    // 讀入各月份的 localStorage 快取
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('app_archive_')) {
+        const month = key.replace('app_archive_', '');
+        if (/^\d{4}-\d{2}$/.test(month)) {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(key)!);
+            if (Array.isArray(parsed)) result[month] = parsed;
+          } catch (e) { console.error(e); }
+        }
+      }
+    }
+    return result;
   });
+  // 已從 Firestore 載入過的月份（避免重複 fetch）
+  const loadedFirebaseArchiveMonths = useRef<Set<string>>(new Set());
   const [therapistOrder, setTherapistOrder] = useState<string[]>(() => {
     const saved = localStorage.getItem('app_therapist_order');
     if (saved) {
@@ -219,8 +245,10 @@ export default function App() {
   }, [scheduleCells]);
 
   useEffect(() => {
-    localStorage.setItem('app_archived_assignments', JSON.stringify(archivedAssignments));
-  }, [archivedAssignments]);
+    Object.entries(archiveByMonth).forEach(([month, records]) => {
+      localStorage.setItem(`app_archive_${month}`, JSON.stringify(records));
+    });
+  }, [archiveByMonth]);
 
   useEffect(() => {
     localStorage.setItem('app_therapist_order', JSON.stringify(therapistOrder));
@@ -273,7 +301,10 @@ export default function App() {
         else if (e.key === 'app_schedule_cells') setScheduleCells(
           val.map((c: any) => ({ ...c, isBlockedByLeave: false, isSystemBlocked: false }))
         );
-        else if (e.key === 'app_archived_assignments') setArchivedAssignments(val);
+        else if (e.key?.startsWith('app_archive_')) {
+          const month = e.key.replace('app_archive_', '');
+          if (/^\d{4}-\d{2}$/.test(month)) setArchiveByMonth(prev => ({ ...prev, [month]: val }));
+        }
         else if (e.key === 'app_therapist_order') setTherapistOrder(val);
         else if (e.key === 'app_next_rotation_index') setNextRotationIndex(val);
         else if (e.key === 'app_rotation_indices') setRotationIndices(val);
@@ -314,7 +345,29 @@ export default function App() {
           ...c, isBlockedByLeave: false, isSystemBlocked: false
         })));
       }
-      if (Array.isArray(data.archivedAssignments)) setArchivedAssignments(data.archivedAssignments);
+      // 遷移：若 sharedState 仍有舊版 archivedAssignments，搬到月份子文件並刪除欄位
+      if (Array.isArray(data.archivedAssignments) && data.archivedAssignments.length > 0 && db) {
+        const byMonth: Record<string, ArchivedAssignment[]> = {};
+        (data.archivedAssignments as ArchivedAssignment[]).forEach(r => {
+          const month = r.date.substring(0, 7);
+          if (!byMonth[month]) byMonth[month] = [];
+          byMonth[month].push(r);
+        });
+        const writes = Object.entries(byMonth).map(([month, records]) =>
+          setDoc(doc(db!, 'scheduleApp', `archive_${month}`), { records }, { merge: true })
+        );
+        Promise.all(writes)
+          .then(() => updateDoc(doc(db!, 'scheduleApp', 'sharedState'), { archivedAssignments: deleteField() }))
+          .catch(console.error);
+        setArchiveByMonth(prev => {
+          const next = { ...prev };
+          Object.entries(byMonth).forEach(([month, records]) => {
+            const seen = new Set((next[month] || []).map(r => r.id));
+            next[month] = [...(next[month] || []), ...records.filter(r => !seen.has(r.id))];
+          });
+          return next;
+        });
+      }
       if (Array.isArray(data.therapistOrder)) setTherapistOrder(data.therapistOrder);
       if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
       if (data.rotationIndices) setRotationIndices(data.rotationIndices);
@@ -347,7 +400,7 @@ export default function App() {
       if (isFromFirebase.current || !db) return;
       try {
         await setDoc(doc(db, 'scheduleApp', 'sharedState'), {
-          patients, therapists, leaves, scheduleCells, archivedAssignments,
+          patients, therapists, leaves, scheduleCells,
           therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
           adminPassword: adminPassword || null,
           sitePassword: sitePassword || null,
@@ -358,7 +411,7 @@ export default function App() {
         setSyncStatus('error');
       }
     }, 1500);
-  }, [patients, therapists, leaves, scheduleCells, archivedAssignments, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword, sitePassword]);
+  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword, sitePassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -383,6 +436,25 @@ export default function App() {
     return monthStr >= '2026-06' ? monthStr : '2026-06';
   });
 
+  // 按需從 Firestore 載入所選月份的歸檔記錄（若本地快取已有則跳過）
+  useEffect(() => {
+    if (!FIREBASE_CONFIGURED || !db) return;
+    if (loadedFirebaseArchiveMonths.current.has(statsMonth)) return;
+    loadedFirebaseArchiveMonths.current.add(statsMonth);
+    getDoc(doc(db, 'scheduleApp', `archive_${statsMonth}`)).then(snap => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (!Array.isArray(data.records)) return;
+      const remoteRecords = data.records as ArchivedAssignment[];
+      setArchiveByMonth(prev => {
+        const existing = prev[statsMonth] || [];
+        const seen = new Set(existing.map(r => r.id));
+        const merged = [...existing, ...remoteRecords.filter(r => !seen.has(r.id))];
+        return { ...prev, [statsMonth]: merged };
+      });
+    }).catch(console.error);
+  }, [statsMonth]);
+
   // Dynamically compile the list of uniquely selectable months starting strictly from June 2026
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
@@ -403,16 +475,13 @@ export default function App() {
     });
 
     // 歸檔記錄的月份也要列入（即使該月病人已從現行名單移除）
-    archivedAssignments.forEach(r => {
-      const m = r.date.substring(0, 7);
-      if (/^\d{4}-\d{2}$/.test(m) && m >= '2026-06') {
-        months.add(m);
-      }
+    Object.keys(archiveByMonth).forEach(m => {
+      if (m >= '2026-06') months.add(m);
     });
 
     // Sort descending so latest is on top, then backwards in history
     return Array.from(months).sort((a, b) => b.localeCompare(a));
-  }, [patients, archivedAssignments]);
+  }, [patients, archiveByMonth]);
   const [recommendedResult, setRecommendedResult] = useState<{
     therapist: Therapist;
     cellIds: string[];
@@ -513,10 +582,29 @@ export default function App() {
       });
       if (toArchive.length === 0) return;
 
-      setArchivedAssignments(prev => {
-        const seen = new Set(prev.map(r => r.id));
-        return [...prev, ...toArchive.filter(r => !seen.has(r.id))];
+      setArchiveByMonth(prev => {
+        const next = { ...prev };
+        toArchive.forEach(r => {
+          const month = r.date.substring(0, 7);
+          if (!next[month]) next[month] = [];
+          const seen = new Set(next[month].map(x => x.id));
+          if (!seen.has(r.id)) next[month] = [...next[month], r];
+        });
+        return next;
       });
+      // 寫入 Firestore 月份子文件（各月獨立，不受 1MB 限制影響）
+      if (FIREBASE_CONFIGURED && db) {
+        const byMonth: Record<string, ArchivedAssignment[]> = {};
+        toArchive.forEach(r => {
+          const month = r.date.substring(0, 7);
+          if (!byMonth[month]) byMonth[month] = [];
+          byMonth[month].push(r);
+        });
+        Object.entries(byMonth).forEach(([month, records]) => {
+          setDoc(doc(db!, 'scheduleApp', `archive_${month}`), { records: arrayUnion(...records) }, { merge: true })
+            .catch(console.error);
+        });
+      }
       setScheduleCells(updatedCells);
       setNotif({
         message: `📦 已自動換日：${toArchive.length} 筆過往排班已歸檔（報表資料完整保留），今日課表重新開始。`,
@@ -528,7 +616,7 @@ export default function App() {
 
   // 月報表資料 = 已歸檔的歷史記錄 + 目前課表格子上的記錄（兩者不重疊：歸檔時格子已清空）
   const getRecordsForMonth = (month: string): ArchivedAssignment[] => {
-    const records: ArchivedAssignment[] = archivedAssignments.filter(r => r.date.startsWith(month));
+    const records: ArchivedAssignment[] = [...(archiveByMonth[month] || [])];
     scheduleCells.forEach(c => {
       if (!c.patientId) return;
       const p = patientMap.get(c.patientId);
@@ -1615,7 +1703,16 @@ export default function App() {
         }));
 
         // 同步刪除該月份的歸檔記錄（重置 = 該月服務量歸零）
-        setArchivedAssignments(prev => prev.filter(r => !r.date.startsWith(monthValue)));
+        setArchiveByMonth(prev => {
+          const next = { ...prev };
+          delete next[monthValue];
+          localStorage.removeItem(`app_archive_${monthValue}`);
+          return next;
+        });
+        loadedFirebaseArchiveMonths.current.delete(monthValue);
+        if (FIREBASE_CONFIGURED && db) {
+          deleteDoc(doc(db, 'scheduleApp', `archive_${monthValue}`)).catch(console.error);
+        }
 
         setNotif({
           message: `🔄 ${formattedMonth} 的所有人工作量已成功重置！當期服務量已歸零。`,
@@ -2292,7 +2389,7 @@ export default function App() {
                       }`}
                     >
                       <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-                      <span>住院複雜 (單格)</span>
+                      <span>住院複雜</span>
                     </button>
                     
                     <button
@@ -2305,7 +2402,7 @@ export default function App() {
                       }`}
                     >
                       <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                      <span>門診複雜 (單格)</span>
+                      <span>門診複雜</span>
                     </button>
                     
                     <button
@@ -2318,7 +2415,7 @@ export default function App() {
                       }`}
                     >
                       <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                      <span>中複病人 (單格)</span>
+                      <span>中複病人</span>
                     </button>
 
                     <button
@@ -2331,7 +2428,7 @@ export default function App() {
                       }`}
                     >
                       <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span>中度 (單格)</span>
+                      <span>中度</span>
                     </button>
 
                     <button
@@ -2345,7 +2442,7 @@ export default function App() {
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-rose-500" />
-                        <span>副木製作 (單格)</span>
+                        <span>副木製作</span>
                       </div>
                     </button>
                   </div>
