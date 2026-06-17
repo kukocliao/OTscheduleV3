@@ -1969,11 +1969,25 @@ export default function App() {
         // 2. Clear from patient queue
         setPatients(prev => prev.filter(p => p.id !== id));
         if (selectedPatientId === id) setSelectedPatientId(null);
-        
+
         setNotif({
           message: `已刪除病患 ${name} 及其相關課程預約。`,
           type: 'info'
         });
+      }
+    );
+  };
+
+  const handleClearAllPatients = () => {
+    if (patients.length === 0) return;
+    triggerConfirm(
+      '清空名冊確認',
+      `確定要清空所有 ${patients.length} 位個案嗎？這將同步清除全部排班格子，此操作無法復原。`,
+      () => {
+        setScheduleCells(prev => prev.map(c => ({ ...c, patientId: null })));
+        setPatients([]);
+        setSelectedPatientId(null);
+        setNotif({ message: `已清空排程資料庫名冊（共 ${patients.length} 位個案）。`, type: 'info' });
       }
     );
   };
@@ -3119,6 +3133,15 @@ export default function App() {
                   <Users className="w-5 h-5 text-indigo-600" />
                   <h3 className="font-extrabold text-slate-800 text-base">病人排程資料庫名冊 ({patients.length})</h3>
                 </div>
+                {patients.length > 0 && (
+                  <button
+                    onClick={handleClearAllPatients}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    清空名冊
+                  </button>
+                )}
               </div>
 
               {/* Master CRUD Table */}
