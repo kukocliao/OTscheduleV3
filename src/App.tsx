@@ -3133,15 +3133,14 @@ export default function App() {
                   <Users className="w-5 h-5 text-indigo-600" />
                   <h3 className="font-extrabold text-slate-800 text-base">病人排程資料庫名冊 ({patients.length})</h3>
                 </div>
-                {patients.length > 0 && (
-                  <button
-                    onClick={handleClearAllPatients}
-                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    清空名冊
-                  </button>
-                )}
+                <button
+                  onClick={handleClearAllPatients}
+                  disabled={patients.length === 0}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  清空名冊
+                </button>
               </div>
 
               {/* Master CRUD Table */}
