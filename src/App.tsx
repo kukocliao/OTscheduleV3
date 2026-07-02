@@ -2375,7 +2375,7 @@ export default function App() {
                 <select
                   value={loginUserId}
                   onChange={e => { setLoginUserId(e.target.value); setSiteLoginError(''); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
                   autoFocus
                 >
                   <option value="">— 請選擇使用者 —</option>
@@ -2391,7 +2391,7 @@ export default function App() {
                   type="password"
                   value={sitePwdInput}
                   onChange={e => { setSitePwdInput(e.target.value); setSiteLoginError(''); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   placeholder="請輸入密碼"
                 />
               </div>
@@ -2408,7 +2408,7 @@ export default function App() {
                   type="password"
                   value={sitePwdSetupInput}
                   onChange={e => { setSitePwdSetupInput(e.target.value); setSiteLoginError(''); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   placeholder="請輸入密碼"
                   autoFocus
                 />
@@ -2419,7 +2419,7 @@ export default function App() {
                   type="password"
                   value={sitePwdSetupConfirmInput}
                   onChange={e => { setSitePwdSetupConfirmInput(e.target.value); setSiteLoginError(''); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   placeholder="再次輸入密碼"
                 />
               </div>
@@ -2436,7 +2436,7 @@ export default function App() {
                   type="password"
                   value={sitePwdInput}
                   onChange={e => { setSitePwdInput(e.target.value); setSiteLoginError(''); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   placeholder="請輸入密碼"
                   autoFocus
                 />
@@ -2457,16 +2457,16 @@ export default function App() {
 
       {/* Header Block with Clinic Logos */}
       <header id="main-header" className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
-          
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3 flex flex-col md:flex-row items-center justify-between gap-2 sm:gap-4">
+
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-100">
-              <Calendar className="w-6 h-6" />
+            <div className="p-2 sm:p-2.5 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-100">
+              <Calendar className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-slate-800 tracking-tight">職能治療排程管理系統</h1>
-                <span className="bg-indigo-50 text-indigo-700 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-indigo-100">
+                <h1 className="text-base sm:text-xl font-bold text-slate-800 tracking-tight">職能治療排程管理系統</h1>
+                <span className="hidden sm:inline-block bg-indigo-50 text-indigo-700 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-indigo-100">
                   前台書記 + 後台管理
                 </span>
                 {FIREBASE_CONFIGURED ? (
@@ -2548,26 +2548,26 @@ export default function App() {
           <div className="flex space-x-1 py-2">
             <button
               onClick={() => { setActiveTab('scheduler'); setSelectedPatientId(null); }}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-xs font-semibold rounded-lg transition-all shrink-0 ${
                 activeTab === 'scheduler' 
                   ? 'bg-white text-indigo-700 shadow-sm border border-slate-200' 
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
               }`}
             >
               <Calendar className="w-4 h-4 text-indigo-600" />
-              <span>📋 書記排班作業板 (前台)</span>
+              <span>📋 書記排班作業板<span className="hidden sm:inline"> (前台)</span></span>
             </button>
 
             <button
               onClick={() => { setActiveTab('admin'); setSelectedPatientId(null); }}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-xs font-semibold rounded-lg transition-all shrink-0 ${
                 activeTab === 'admin' 
                   ? 'bg-white text-indigo-700 shadow-sm border border-slate-200' 
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
               }`}
             >
               <Sliders className="w-4 h-4 text-indigo-600" />
-              <span>⚙️ 系統設定與後台 (管理員)</span>
+              <span>⚙️ 系統設定與後台<span className="hidden sm:inline"> (管理員)</span></span>
             </button>
           </div>
         </div>
@@ -2946,7 +2946,7 @@ export default function App() {
                                   e.target.value,
                                   isMorning ? 'AM' : 'PM'
                                 )}
-                                className="bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer max-w-[130px] shadow-sm hover:border-slate-350 transition-colors"
+                                className="bg-slate-50 border border-slate-200 text-slate-700 font-bold text-base sm:text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer max-w-[130px] shadow-sm hover:border-slate-350 transition-colors"
                               >
                                 {therapists.filter(t => t.isActive).map(t => (
                                   <option key={t.id} value={t.id}>
@@ -3001,7 +3001,7 @@ export default function App() {
                   type="password"
                   value={pwdSetupInput}
                   onChange={(e) => setPwdSetupInput(e.target.value)}
-                  className="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full text-base sm:text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                   placeholder="輸入管理密碼..."
                 />
               </div>
@@ -3012,7 +3012,7 @@ export default function App() {
                   type="password"
                   value={pwdSetupConfirmInput}
                   onChange={(e) => setPwdSetupConfirmInput(e.target.value)}
-                  className="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full text-base sm:text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                   placeholder="確認管理密碼..."
                 />
               </div>
@@ -3052,7 +3052,7 @@ export default function App() {
                   type="password"
                   value={pwdInput}
                   onChange={(e) => setPwdInput(e.target.value)}
-                  className="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full text-base sm:text-sm p-2.5 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                   placeholder="請輸入密碼..."
                   autoFocus
                 />
@@ -3586,14 +3586,14 @@ export default function App() {
                     type="text"
                     value={u.name}
                     onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, name: e.target.value } : x))}
-                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="使用者名稱"
                   />
                   <input
                     type="text"
                     value={u.password}
                     onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, password: e.target.value } : x))}
-                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="密碼"
                   />
                   <button
@@ -3625,14 +3625,14 @@ export default function App() {
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
                 placeholder="新使用者名稱"
-                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
               <input
                 type="text"
                 value={newUserPassword}
                 onChange={e => setNewUserPassword(e.target.value)}
                 placeholder="密碼"
-                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
               <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer shrink-0">
                 新增使用者
@@ -3728,13 +3728,13 @@ export default function App() {
                 name="newSitePwd"
                 type="password"
                 placeholder="新密碼"
-                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
               <input
                 name="confirmSitePwd"
                 type="password"
                 placeholder="確認新密碼"
-                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
               <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer shrink-0">
                 更新密碼
