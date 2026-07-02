@@ -186,7 +186,7 @@ export default function App() {
 
   // --- Back-end Password Security State ---
   const [adminPassword, setAdminPassword] = useState<string | null>(() => localStorage.getItem('admin_pwd_hash'));
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => sessionStorage.getItem('app_admin_ok') === '1');
   const [pwdInput, setPwdInput] = useState<string>('');
   const [pwdSetupInput, setPwdSetupInput] = useState<string>('');
   const [pwdSetupConfirmInput, setPwdSetupConfirmInput] = useState<string>('');
@@ -1882,8 +1882,32 @@ export default function App() {
   };
 
   // 具名使用者登入（appUsers 有資料時取代系統密碼）
-  const handleUserLogin = (e: React.FormEvent) => {
+  // 內建「管理者」選項：用管理員密碼登入，前台後台一次通行
+  const handleUserLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginUserId === '__admin__') {
+      const stored = adminPassword || '';
+      const ok = isSha256Hash(stored)
+        ? (await sha256(sitePwdInput)) === stored
+        : sitePwdInput === stored; // 舊版明文
+      if (ok) {
+        if (!isSha256Hash(stored)) {
+          const hash = await sha256(sitePwdInput);
+          localStorage.setItem('admin_pwd_hash', hash);
+          setAdminPassword(hash);
+        }
+        sessionStorage.setItem('app_current_user', '管理者');
+        sessionStorage.setItem('app_admin_ok', '1');
+        setCurrentUserName('管理者');
+        setIsSiteAuthenticated(true);
+        setIsAdminAuthenticated(true);
+        setSitePwdInput('');
+        setSiteLoginError('');
+      } else {
+        setSiteLoginError('管理員密碼錯誤，請重新輸入！');
+      }
+      return;
+    }
     const u = appUsers.find(x => x.id === loginUserId);
     if (!u) { setSiteLoginError('請先選擇使用者！'); return; }
     if (sitePwdInput === u.password) {
@@ -1899,6 +1923,7 @@ export default function App() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('app_current_user');
+    sessionStorage.removeItem('app_admin_ok');
     setCurrentUserName(null);
     setIsSiteAuthenticated(false);
     setIsAdminAuthenticated(false);
@@ -1919,6 +1944,7 @@ export default function App() {
     const hash = await sha256(pwdSetupInput);
     localStorage.setItem('admin_pwd_hash', hash);
     setAdminPassword(hash);
+    sessionStorage.setItem('app_admin_ok', '1');
     setIsAdminAuthenticated(true);
     setPwdSetupInput('');
     setPwdSetupConfirmInput('');
@@ -1942,6 +1968,7 @@ export default function App() {
         localStorage.setItem('admin_pwd_hash', hash);
         setAdminPassword(hash);
       }
+      sessionStorage.setItem('app_admin_ok', '1');
       setIsAdminAuthenticated(true);
       setPwdInput('');
       setLoginError('');
@@ -2269,6 +2296,7 @@ export default function App() {
                   {appUsers.map(u => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
+                  {adminPassword && <option value="__admin__">🔑 管理者</option>}
                 </select>
               </div>
               <div>
