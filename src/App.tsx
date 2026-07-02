@@ -31,7 +31,7 @@ import {
 import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment, AppUser, AuditEntry } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
 import { db, FIREBASE_CONFIGURED } from './firebase';
-import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, deleteField, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, deleteField, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
 // --- Custom Fixed Therapist Sequences based on user specification ---
 // Default rotation sequences — overridden by localStorage/Firebase if configured
@@ -1707,6 +1707,99 @@ export default function App() {
     }
   };
 
+
+  // --- 完整備份匯出 / 匯入還原 ---
+  const handleExportBackup = async () => {
+    // 歸檔月份：合併記憶體、localStorage、Firestore（雲端模式撈全部 archive_* 文件）
+    const months: Record<string, ArchivedAssignment[]> = { ...archiveByMonth };
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('app_archive_'))
+      .forEach(k => {
+        const m = k.replace('app_archive_', '');
+        if (!months[m]) { try { months[m] = JSON.parse(localStorage.getItem(k) || '[]'); } catch {} }
+      });
+    if (FIREBASE_CONFIGURED && db) {
+      try {
+        const snap = await getDocs(collection(db, 'scheduleApp'));
+        snap.forEach(d => {
+          if (d.id.startsWith('archive_')) {
+            const m = d.id.replace('archive_', '');
+            months[m] = (d.data().records || []) as ArchivedAssignment[];
+          }
+        });
+      } catch {
+        setNotif({ message: '⚠️ 讀取雲端歸檔失敗，備份僅含本機已載入的月份！', type: 'error' });
+      }
+    }
+    const backup = {
+      app: 'OTscheduleV3', version: 1, exportedAt: new Date().toISOString(),
+      patients, therapists, leaves, scheduleCells,
+      therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
+      appUsers, auditLog,
+      adminPassword: adminPassword || null,
+      sitePassword: sitePassword || null,
+      archiveByMonth: months
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `OTschedule備份_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setNotif({ message: '📦 完整備份已匯出！請妥善保存（內含使用者與密碼資料）。', type: 'success' });
+  };
+
+  const handleImportBackup = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data: any;
+      try { data = JSON.parse(String(reader.result)); } catch {
+        setNotif({ message: '⚠️ 檔案格式錯誤，不是有效的 JSON！', type: 'error' });
+        return;
+      }
+      if (data?.app !== 'OTscheduleV3' || !Array.isArray(data.patients) || !Array.isArray(data.therapists) || !Array.isArray(data.scheduleCells)) {
+        setNotif({ message: '⚠️ 這不是 OTscheduleV3 的備份檔！', type: 'error' });
+        return;
+      }
+      triggerConfirm(
+        '匯入備份確認',
+        `即將以備份檔（匯出於 ${data.exportedAt?.split('T')[0] || '未知日期'}，含 ${data.patients.length} 位病人）覆蓋目前所有資料，包含病人、治療師、排班、歸檔、使用者與密碼。此動作無法復原，是否繼續？`,
+        () => {
+          setPatients(data.patients);
+          setTherapists(data.therapists);
+          setLeaves(Array.isArray(data.leaves) ? data.leaves : []);
+          setScheduleCells(data.scheduleCells);
+          if (Array.isArray(data.therapistOrder)) setTherapistOrder(data.therapistOrder);
+          if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
+          if (data.rotationIndices) setRotationIndices(data.rotationIndices);
+          if (data.rotationSequences) setRotationSequences(data.rotationSequences);
+          if (Array.isArray(data.appUsers)) setAppUsers(data.appUsers);
+          if (Array.isArray(data.auditLog)) setAuditLog(data.auditLog);
+          if (data.adminPassword !== undefined) {
+            setAdminPassword(data.adminPassword || null);
+            if (data.adminPassword) localStorage.setItem('admin_pwd_hash', data.adminPassword);
+            else localStorage.removeItem('admin_pwd_hash');
+          }
+          if (data.sitePassword !== undefined) {
+            setSitePassword(data.sitePassword || null);
+            if (data.sitePassword) localStorage.setItem('app_site_pwd', data.sitePassword);
+            else localStorage.removeItem('app_site_pwd');
+          }
+          const months: Record<string, ArchivedAssignment[]> = data.archiveByMonth || {};
+          setArchiveByMonth(months);
+          Object.entries(months).forEach(([m, records]) => {
+            localStorage.setItem(`app_archive_${m}`, JSON.stringify(records));
+            if (FIREBASE_CONFIGURED && db) {
+              setDoc(doc(db, 'scheduleApp', `archive_${m}`), { records }).catch(console.error);
+            }
+          });
+          setNotif({ message: `✅ 備份匯入完成！已還原 ${data.patients.length} 位病人與全部設定。`, type: 'success' });
+        }
+      );
+    };
+    reader.readAsText(file);
+  };
 
   // --- CSV Export (Saves local assignment report as downloadable file) ---
   const handleExportCSV = () => {
@@ -3647,6 +3740,40 @@ export default function App() {
                 更新密碼
               </button>
             </form>
+          </div>
+
+          {/* 資料備份與還原 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+              <Database className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-extrabold text-slate-800 text-base">資料備份與還原</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4 bg-slate-50 p-2.5 rounded border border-slate-100">
+              匯出完整備份（病人、治療師、排班、歸檔報表、使用者、密碼、輪替設定），建議改版前先下載保存。匯入會<strong className="text-rose-600">覆蓋目前所有資料</strong>，請小心操作。備份檔內含密碼資料，請妥善保管。
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={handleExportBackup}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                匯出完整備份 (JSON)
+              </button>
+              <label className="flex items-center justify-center gap-1.5 px-4 py-2 bg-white border border-slate-300 hover:border-indigo-400 hover:text-indigo-700 text-slate-700 font-bold rounded-lg text-sm transition-colors cursor-pointer">
+                <Plus className="w-4 h-4" />
+                匯入備份還原
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) handleImportBackup(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
           </div>
 
           {/* 輪替序列編輯器 */}
