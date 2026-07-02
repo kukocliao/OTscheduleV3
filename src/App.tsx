@@ -25,9 +25,10 @@ import {
   Undo,
   Edit,
   RotateCcw,
-  Lock
+  Lock,
+  ClipboardList
 } from 'lucide-react';
-import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment } from './types';
+import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment, AppUser, AuditEntry } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
 import { db, FIREBASE_CONFIGURED } from './firebase';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, deleteField, deleteDoc } from 'firebase/firestore';
@@ -40,6 +41,13 @@ export const DEFAULT_ROTATION_SEQUENCES: Record<string, string[]> = {
   am_splint:  ['t1', 't2', 't3', 't4', 't1', 't4'],
   pm_splint:  ['t1', 't5', 't3', 't4', 't1', 't4'],
 };
+
+// 管理員密碼以 SHA-256 雜湊儲存；64 位 hex 視為雜湊，其餘視為舊版明文（登入成功時自動升級）
+async function sha256(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const isSha256Hash = (s: string) => /^[0-9a-f]{64}$/.test(s);
 
 export default function App() {
   // --- Active Tab State ---
@@ -186,12 +194,26 @@ export default function App() {
 
   // Site-wide password gate
   const [sitePassword, setSitePassword] = useState<string | null>(() => localStorage.getItem('app_site_pwd'));
-  const [isSiteAuthenticated, setIsSiteAuthenticated] = useState<boolean>(false);
+  const [isSiteAuthenticated, setIsSiteAuthenticated] = useState<boolean>(() => !!sessionStorage.getItem('app_current_user'));
   const [sitePwdInput, setSitePwdInput] = useState<string>('');
   const [sitePwdSetupInput, setSitePwdSetupInput] = useState<string>('');
   const [sitePwdSetupConfirmInput, setSitePwdSetupConfirmInput] = useState<string>('');
   const [siteLoginError, setSiteLoginError] = useState<string>('');
-  
+
+  // 具名使用者（有使用者時，登入畫面改為「選使用者＋密碼」）
+  const [appUsers, setAppUsers] = useState<AppUser[]>(() => {
+    try { return JSON.parse(localStorage.getItem('app_users') || '[]'); } catch { return []; }
+  });
+  const [currentUserName, setCurrentUserName] = useState<string | null>(() => sessionStorage.getItem('app_current_user'));
+  const [loginUserId, setLoginUserId] = useState<string>('');
+  const [newUserName, setNewUserName] = useState<string>('');
+  const [newUserPassword, setNewUserPassword] = useState<string>('');
+
+  // 排程稽核紀錄（最新在前，上限 500 筆）
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>(() => {
+    try { return JSON.parse(localStorage.getItem('app_audit_log') || '[]'); } catch { return []; }
+  });
+
   // Notification logs for user activities (to keep UX interactive and responsive)
   const [notif, setNotif] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>({
     message: '職能治療排程管理系統載入成功！已依範本初始化 5 名治療師及預設課表。',
@@ -263,6 +285,14 @@ export default function App() {
     localStorage.setItem('app_rotation_sequences', JSON.stringify(rotationSequences));
   }, [rotationIndices, rotationSequences]);
 
+  useEffect(() => {
+    localStorage.setItem('app_users', JSON.stringify(appUsers));
+  }, [appUsers]);
+
+  useEffect(() => {
+    localStorage.setItem('app_audit_log', JSON.stringify(auditLog));
+  }, [auditLog]);
+
   // Search keyword for patients lists
   const [patientSearch, setPatientSearch] = useState('');
 
@@ -310,6 +340,8 @@ export default function App() {
         else if (e.key === 'app_rotation_indices') setRotationIndices(val);
         else if (e.key === 'app_rotation_sequences') setRotationSequences(val);
         else if (e.key === 'admin_pwd_hash') setAdminPassword(val || null);
+        else if (e.key === 'app_users') setAppUsers(val);
+        else if (e.key === 'app_audit_log') setAuditLog(val);
       } catch {}
     };
     window.addEventListener('storage', handleStorage);
@@ -372,6 +404,8 @@ export default function App() {
       if (typeof data.nextRotationIndex === 'number') setNextRotationIndex(data.nextRotationIndex);
       if (data.rotationIndices) setRotationIndices(data.rotationIndices);
       if (data.rotationSequences) setRotationSequences(data.rotationSequences);
+      if (Array.isArray(data.appUsers)) setAppUsers(data.appUsers);
+      if (Array.isArray(data.auditLog)) setAuditLog(data.auditLog);
       if (data.adminPassword !== undefined) {
         setAdminPassword(data.adminPassword || null);
         if (data.adminPassword) localStorage.setItem('admin_pwd_hash', data.adminPassword);
@@ -402,6 +436,7 @@ export default function App() {
         await setDoc(doc(db, 'scheduleApp', 'sharedState'), {
           patients, therapists, leaves, scheduleCells,
           therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
+          appUsers, auditLog,
           adminPassword: adminPassword || null,
           sitePassword: sitePassword || null,
           lastUpdated: new Date().toISOString()
@@ -411,7 +446,7 @@ export default function App() {
         setSyncStatus('error');
       }
     }, 1500);
-  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, adminPassword, sitePassword]);
+  }, [patients, therapists, leaves, scheduleCells, therapistOrder, nextRotationIndex, rotationIndices, rotationSequences, appUsers, auditLog, adminPassword, sitePassword]);
 
   // --- Simplified Clerk Workflow States ---
   const [clerkMedicalId, setClerkMedicalId] = useState('');
@@ -822,6 +857,22 @@ export default function App() {
 
   // --- Core Application Scheduling Action Hooks ---
 
+  // 寫入稽核紀錄（最新在前）ponytail: 上限 500 筆，超過即丟最舊
+  const logAction = (
+    action: AuditEntry['action'],
+    patientName: string,
+    medicalId: string,
+    therapistName: string,
+    detail: string
+  ) => {
+    setAuditLog(prev => [{
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      userName: currentUserName || '管理者',
+      action, patientName, medicalId, therapistName, detail
+    }, ...prev].slice(0, 500));
+  };
+
   // Assign a patient to a specific slot
   const handleAssignPatient = (cellId: string, pId: string, isManualOverride: boolean = false) => {
     const patientObj = patientMap.get(pId);
@@ -918,6 +969,9 @@ export default function App() {
       }
     });
 
+    logAction(isManualOverride ? '調整' : '指派', patientObj.name, patientObj.medicalId,
+      therapistMap.get(cellObj.therapistId)?.name || '', cellObj.slotLabel);
+
     // Update Round-Robin state: point to the next therapist in priority after successful rotation assignment
     if (!isManualOverride) {
       const activeIdxInRotation = sortedTherapistsInRotation.findIndex(t => t.id === cellObj.therapistId);
@@ -963,6 +1017,8 @@ export default function App() {
       message: `已移除個案 ${patientObj.name} 並釋放治療課表格子。`,
       type: 'info'
     });
+    logAction('撤銷', patientObj.name, patientObj.medicalId,
+      therapistMap.get(cell.therapistId)?.name || '', cell.slotLabel);
   };
 
   // Modify therapist assignment from the assigned pairs table with full grid sync
@@ -1075,6 +1131,8 @@ export default function App() {
       message: `🔄 變更成功！已將個案 ${patientName} 的課表，由 ${oldName} 的時段更換至 ${newName}`,
       type: 'success'
     });
+    logAction('調整', patientName, patientMap.get(patientId)?.medicalId || '', newName,
+      `由 ${oldName} 改為 ${newName}（${ampm === 'AM' ? '上午' : '下午'}）`);
   };
 
   // --- Simplified Clerk Handlers & UI Interactions ---
@@ -1242,6 +1300,8 @@ export default function App() {
       message: `🎉 指派成功！已將個案 ${finalName} (${finalMedicalId}) 排入 ${recommendedResult.therapist.name} 的課表！`,
       type: 'success'
     });
+    logAction('指派', finalName, finalMedicalId, recommendedResult.therapist.name,
+      `${clerkScheduleDate} ${clerkTimeMode === 'AM' ? '上午' : '下午'}`);
 
     // Advance custom sequence state pointer!
     if (recommendedResult.seqKey && recommendedResult.seqIndexUsed !== undefined) {
@@ -1766,7 +1826,32 @@ export default function App() {
     }
   };
 
-  const handleSetAdminPassword = (e: React.FormEvent) => {
+  // 具名使用者登入（appUsers 有資料時取代系統密碼）
+  const handleUserLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const u = appUsers.find(x => x.id === loginUserId);
+    if (!u) { setSiteLoginError('請先選擇使用者！'); return; }
+    if (sitePwdInput === u.password) {
+      sessionStorage.setItem('app_current_user', u.name);
+      setCurrentUserName(u.name);
+      setIsSiteAuthenticated(true);
+      setSitePwdInput('');
+      setSiteLoginError('');
+    } else {
+      setSiteLoginError('密碼錯誤，請重新輸入！');
+    }
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('app_current_user');
+    setCurrentUserName(null);
+    setIsSiteAuthenticated(false);
+    setIsAdminAuthenticated(false);
+    setLoginUserId('');
+    setActiveTab('scheduler');
+  };
+
+  const handleSetAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pwdSetupInput.trim()) {
       setLoginError('密碼不可為空！');
@@ -1776,8 +1861,9 @@ export default function App() {
       setLoginError('兩次輸入的密碼不一致！');
       return;
     }
-    localStorage.setItem('admin_pwd_hash', pwdSetupInput);
-    setAdminPassword(pwdSetupInput);
+    const hash = await sha256(pwdSetupInput);
+    localStorage.setItem('admin_pwd_hash', hash);
+    setAdminPassword(hash);
     setIsAdminAuthenticated(true);
     setPwdSetupInput('');
     setPwdSetupConfirmInput('');
@@ -1788,9 +1874,19 @@ export default function App() {
     });
   };
 
-  const handleVerifyAdminPassword = (e: React.FormEvent) => {
+  const handleVerifyAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pwdInput === adminPassword) {
+    const stored = adminPassword || '';
+    const ok = isSha256Hash(stored)
+      ? (await sha256(pwdInput)) === stored
+      : pwdInput === stored; // 舊版明文
+    if (ok) {
+      if (!isSha256Hash(stored)) {
+        // 明文自動升級為雜湊（會同步回 Firestore）
+        const hash = await sha256(pwdInput);
+        localStorage.setItem('admin_pwd_hash', hash);
+        setAdminPassword(hash);
+      }
       setIsAdminAuthenticated(true);
       setPwdInput('');
       setLoginError('');
@@ -2100,11 +2196,42 @@ export default function App() {
             </div>
             <h2 className="text-lg font-extrabold text-slate-800">職能治療排程管理系統</h2>
             <p className="text-xs text-slate-500">
-              {sitePassword ? '請輸入密碼以進入系統' : '首次使用，請設定系統密碼'}
+              {appUsers.length > 0 ? '請選擇使用者並輸入密碼' : sitePassword ? '請輸入密碼以進入系統' : '首次使用，請設定系統密碼'}
             </p>
           </div>
 
-          {!sitePassword ? (
+          {appUsers.length > 0 ? (
+            <form onSubmit={handleUserLogin} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">使用者</label>
+                <select
+                  value={loginUserId}
+                  onChange={e => { setLoginUserId(e.target.value); setSiteLoginError(''); }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                  autoFocus
+                >
+                  <option value="">— 請選擇使用者 —</option>
+                  {appUsers.map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">密碼</label>
+                <input
+                  type="password"
+                  value={sitePwdInput}
+                  onChange={e => { setSitePwdInput(e.target.value); setSiteLoginError(''); }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="請輸入密碼"
+                />
+              </div>
+              {siteLoginError && <p className="text-xs text-rose-600 font-semibold">{siteLoginError}</p>}
+              <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer">
+                登入系統
+              </button>
+            </form>
+          ) : !sitePassword ? (
             <form onSubmit={handleSetSitePassword} className="space-y-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">設定系統密碼</label>
@@ -2201,6 +2328,17 @@ export default function App() {
 
           {/* Quick Real-Time Status metrics */}
           <div className="flex items-center gap-3 self-stretch md:self-auto justify-end">
+            {currentUserName && (
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                <span className="font-bold">👤 {currentUserName}</span>
+                <button
+                  onClick={handleLogout}
+                  className="text-slate-400 hover:text-rose-600 font-medium underline cursor-pointer"
+                >
+                  登出
+                </button>
+              </div>
+            )}
             <button
               onClick={handleExportCSV}
               id="export-csv-btn"
@@ -3353,6 +3491,142 @@ export default function App() {
 
           </div>
 
+          {/* 使用者管理 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+              <Users className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-extrabold text-slate-800 text-base">使用者管理</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4 bg-slate-50 p-2.5 rounded border border-slate-100">
+              建立使用者後，前台登入將改為「選擇使用者＋輸入該使用者密碼」，排程動作會記錄操作者名稱。請記得也為自己建立一個使用者帳號。
+            </p>
+            <div className="space-y-2 mb-4">
+              {appUsers.length === 0 && (
+                <p className="text-xs text-slate-400">尚未建立任何使用者（目前沿用系統密碼登入）。</p>
+              )}
+              {appUsers.map(u => (
+                <div key={u.id} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                  <input
+                    type="text"
+                    value={u.name}
+                    onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, name: e.target.value } : x))}
+                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="使用者名稱"
+                  />
+                  <input
+                    type="text"
+                    value={u.password}
+                    onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, password: e.target.value } : x))}
+                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="密碼"
+                  />
+                  <button
+                    onClick={() => triggerConfirm(
+                      '刪除使用者',
+                      `確定要刪除使用者「${u.name}」嗎？該使用者將無法再登入系統。`,
+                      () => setAppUsers(prev => prev.filter(x => x.id !== u.id))
+                    )}
+                    className="px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    刪除
+                  </button>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const name = newUserName.trim();
+              const pwd = newUserPassword.trim();
+              if (!name || !pwd) { setNotif({ message: '使用者名稱與密碼皆不可為空！', type: 'error' }); return; }
+              if (appUsers.some(u => u.name === name)) { setNotif({ message: '已有同名使用者！', type: 'error' }); return; }
+              setAppUsers(prev => [...prev, { id: `user-${Date.now()}`, name, password: pwd }]);
+              setNewUserName('');
+              setNewUserPassword('');
+              setNotif({ message: `使用者「${name}」已建立！`, type: 'success' });
+            }} className="flex flex-col sm:flex-row gap-3 max-w-md pt-3 border-t border-slate-100">
+              <input
+                type="text"
+                value={newUserName}
+                onChange={e => setNewUserName(e.target.value)}
+                placeholder="新使用者名稱"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <input
+                type="text"
+                value={newUserPassword}
+                onChange={e => setNewUserPassword(e.target.value)}
+                placeholder="密碼"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer shrink-0">
+                新增使用者
+              </button>
+            </form>
+          </div>
+
+          {/* 排程稽核紀錄 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-extrabold text-slate-800 text-base">排程稽核紀錄</h3>
+                <span className="text-[10px] text-slate-400 font-semibold">（保留最近 500 筆）</span>
+              </div>
+              {auditLog.length > 0 && (
+                <button
+                  onClick={() => triggerConfirm(
+                    '清除稽核紀錄',
+                    '確定要清除所有排程稽核紀錄嗎？此動作無法復原。',
+                    () => setAuditLog([])
+                  )}
+                  className="text-[10px] text-slate-400 hover:text-rose-600 underline font-medium cursor-pointer"
+                >
+                  清除全部
+                </button>
+              )}
+            </div>
+            {auditLog.length === 0 ? (
+              <p className="text-xs text-slate-400">尚無任何排程紀錄。</p>
+            ) : (
+              <div className="overflow-x-auto max-h-80 overflow-y-auto border border-slate-100 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-bold">時間</th>
+                      <th className="text-left py-2 px-3 font-bold">使用者</th>
+                      <th className="text-left py-2 px-3 font-bold">動作</th>
+                      <th className="text-left py-2 px-3 font-bold">病歷號</th>
+                      <th className="text-left py-2 px-3 font-bold">病人</th>
+                      <th className="text-left py-2 px-3 font-bold">治療師</th>
+                      <th className="text-left py-2 px-3 font-bold">內容</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLog.slice(0, 200).map(entry => (
+                      <tr key={entry.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                        <td className="py-1.5 px-3 whitespace-nowrap text-slate-500">
+                          {new Date(entry.timestamp).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="py-1.5 px-3 font-bold text-slate-700">{entry.userName}</td>
+                        <td className="py-1.5 px-3">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            entry.action === '指派' ? 'bg-emerald-50 text-emerald-700' :
+                            entry.action === '撤銷' ? 'bg-rose-50 text-rose-700' :
+                            'bg-amber-50 text-amber-700'
+                          }`}>{entry.action}</span>
+                        </td>
+                        <td className="py-1.5 px-3 font-mono">{entry.medicalId}</td>
+                        <td className="py-1.5 px-3">{entry.patientName}</td>
+                        <td className="py-1.5 px-3">{entry.therapistName}</td>
+                        <td className="py-1.5 px-3 text-slate-500">{entry.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* 系統密碼管理 */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
             <div className="flex items-center gap-2 mb-4 pb-2 border-b">
@@ -3360,7 +3634,7 @@ export default function App() {
               <h3 className="font-extrabold text-slate-800 text-base">系統密碼管理</h3>
             </div>
             <p className="text-xs text-slate-500 mb-4 bg-slate-50 p-2.5 rounded border border-slate-100">
-              修改進入系統的密碼。變更後所有裝置須重新登入。
+              修改進入系統的密碼。變更後所有裝置須重新登入。（建立使用者後，登入改為使用者制，此密碼不再使用。）
             </p>
             <form onSubmit={(e) => {
               e.preventDefault();

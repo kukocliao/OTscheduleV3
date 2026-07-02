@@ -67,3 +67,22 @@ export interface LoggedSchedule {
   slots: number[]; // Slot indexes occupied (1 for regular, 2 for complex)
   type: 'AUTO' | 'MANUAL';
 }
+
+// 前台具名使用者（由管理員在後台管理）
+export interface AppUser {
+  id: string;
+  name: string;
+  password: string; // ponytail: 明文儲存方便管理員後台檢視；管理員密碼才用雜湊
+}
+
+// 排程稽核紀錄：誰在什麼時候把誰排給哪位治療師
+export interface AuditEntry {
+  id: string;
+  timestamp: string; // ISO
+  userName: string;
+  action: '指派' | '撤銷' | '調整';
+  patientName: string;
+  medicalId: string;
+  therapistName: string;
+  detail: string; // 日期/時段描述
+}
