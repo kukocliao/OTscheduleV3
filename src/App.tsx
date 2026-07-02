@@ -1252,6 +1252,61 @@ export default function App() {
     }
   };
 
+  // 換下一個治療師：推薦者臨時無法接（如當日休假）時跳過，
+  // 其序列位置往後挪 3 位（不是丟到最後），確保診次量不失衡
+  const handleSkipClerkTherapist = () => {
+    if (!recommendedResult || !recommendedResult.seqKey || recommendedResult.seqIndexUsed === undefined) return;
+    const { seqKey, seqIndexUsed, category } = recommendedResult;
+    const skippedT = recommendedResult.therapist;
+
+    const seq = [...(rotationSequences[seqKey] ?? DEFAULT_ROTATION_SEQUENCES[seqKey])];
+    const [skippedId] = seq.splice(seqIndexUsed, 1);
+    seq.splice(Math.min(seqIndexUsed + 3, seq.length), 0, skippedId);
+
+    // 用調整後的序列，從原指標重新尋找下一位（排除剛被跳過者）
+    const isMorning = clerkTimeMode === 'AM';
+    const startIndex = rotationIndices[seqKey] ?? 0;
+    const N = seq.length;
+    let found: { therapist: Therapist; cellId: string; slotLabel: string; seqIndexUsed: number } | null = null;
+    for (let i = 0; i < N; i++) {
+      const idx = (startIndex + i) % N;
+      const tId = seq[idx];
+      if (tId === skippedId) continue;
+      const t = therapists.find(x => x.id === tId);
+      if (!t || !t.isActive) continue;
+      const freeCell = scheduleCells
+        .filter(c => c.category === category && c.therapistId === tId)
+        .filter(c => isMorning ? c.slotIndex < 100 : c.slotIndex >= 100)
+        .sort((a, b) => a.slotIndex - b.slotIndex)
+        .find(c => !c.patientId && !c.isSystemBlocked && !c.isBlockedByLeave);
+      if (freeCell) {
+        found = { therapist: t, cellId: freeCell.id, slotLabel: freeCell.slotLabel, seqIndexUsed: idx };
+        break;
+      }
+    }
+
+    if (!found) {
+      setNotif({
+        message: `⚠️ 除 ${skippedT.name} 外，其他治療師在本時段的【${getCategoryLabel(category)}】皆無空餘排班格！`,
+        type: 'error'
+      });
+      return;
+    }
+
+    setRotationSequences(prev => ({ ...prev, [seqKey]: seq }));
+    setRecommendedResult(prev => prev ? {
+      ...prev,
+      therapist: found.therapist,
+      cellIds: [found.cellId],
+      slotLabel: found.slotLabel,
+      seqIndexUsed: found.seqIndexUsed
+    } : null);
+    setNotif({
+      message: `🔁 已跳過 ${skippedT.name}（輪替序列往後挪 3 位），改推薦 ${found.therapist.name}。`,
+      type: 'info'
+    });
+  };
+
   const handleConfirmClerkAssignment = () => {
     if (!recommendedResult) return;
 
@@ -2615,9 +2670,19 @@ export default function App() {
                   <div className="space-y-1">
                     <p className="text-xs text-slate-400">系統推薦指派治療師：</p>
                     <p className="text-lg font-black text-white tracking-wide">
-                      {recommendedResult.therapist.name} 
+                      {recommendedResult.therapist.name}
                       <span className="text-xs font-bold text-slate-400 ml-1.5">({recommendedResult.therapist.code})</span>
                     </p>
+                    {recommendedResult.seqKey && recommendedResult.seqIndexUsed !== undefined && (
+                      <button
+                        type="button"
+                        onClick={handleSkipClerkTherapist}
+                        className="mt-1.5 w-full py-1.5 px-3 bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold text-[11px] rounded-lg transition-colors cursor-pointer"
+                        title="推薦的治療師當日臨時休假時使用；被跳過者會往後挪 3 位，診次量不受影響"
+                      >
+                        🔁 換下一個治療師（本日不排此人）
+                      </button>
+                    )}
                   </div>
 
                   {/* Manual Override Option */}
@@ -2702,106 +2767,6 @@ export default function App() {
                   </button>
                 </div>
               )}
-
-              {/* Dynamic rotation queue dashboard view */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3 text-xs text-slate-700 font-sans">
-                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                    <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin-slow" />
-                    <span>🌀 臨床治療師四大輪替佇列</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRotationIndices({ am_regular: 0, pm_regular: 1, am_splint: 2, pm_splint: 3 })}
-                    className="text-[9px] text-slate-500 hover:text-slate-800 px-1 border border-slate-200 bg-white shadow-xs rounded"
-                  >
-                    重置
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {/* AM Regular */}
-                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'am_regular' ? 'bg-amber-50/50 border-amber-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
-                    <div className="flex justify-between items-center text-[10.5px]">
-                      <span>🌅 上午 住院/門診/中常</span>
-                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_regular')}</strong>
-                    </div>
-                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {rotationSequences.am_regular.map((id, idx) => {
-                        const name = therapists.find(t => t.id === id)?.name || id;
-                        const isNext = rotationIndices.am_regular === idx;
-                        return (
-                          <span key={idx} className={isNext ? 'bg-amber-100 text-amber-900 border border-amber-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
-                            {name}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* PM Regular */}
-                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'pm_regular' ? 'bg-indigo-50/50 border-indigo-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
-                    <div className="flex justify-between items-center text-[10.5px]">
-                      <span>🌇 下午 住院/門診/中常</span>
-                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_regular')}</strong>
-                    </div>
-                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {rotationSequences.pm_regular.map((id, idx) => {
-                        const name = therapists.find(t => t.id === id)?.name || id;
-                        const isNext = rotationIndices.pm_regular === idx;
-                        return (
-                          <span key={idx} className={isNext ? 'bg-indigo-100 text-indigo-900 border border-indigo-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
-                            {name}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* AM Splint */}
-                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'am_splint' ? 'bg-rose-50/50 border-rose-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
-                    <div className="flex justify-between items-center text-[10.5px]">
-                      <span>🌅 上午 副木製作</span>
-                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_splint')}</strong>
-                    </div>
-                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {rotationSequences.am_splint.map((id, idx) => {
-                        const name = therapists.find(t => t.id === id)?.name || id;
-                        const isNext = rotationIndices.am_splint === idx;
-                        return (
-                          <span key={idx} className={isNext ? 'bg-rose-100 text-rose-900 border border-rose-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
-                            {name}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* PM Splint */}
-                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'pm_splint' ? 'bg-rose-50/50 border-rose-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
-                    <div className="flex justify-between items-center text-[10.5px]">
-                      <span>🌇 下午 副木製作</span>
-                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_splint')}</strong>
-                    </div>
-                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
-                      {rotationSequences.pm_splint.map((id, idx) => {
-                        const name = therapists.find(t => t.id === id)?.name || id;
-                        const isNext = rotationIndices.pm_splint === idx;
-                        return (
-                          <span key={idx} className={isNext ? 'bg-rose-100 text-rose-900 border border-rose-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
-                            {name}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
-                  <span>登錄個案庫總數：<strong className="text-slate-700">{patients.length} 位</strong></span>
-                  <span>選取時段：<strong className="text-indigo-600 font-bold">{clerkTimeMode === 'AM' ? '🌅 上午 (AM)' : '🌇 下午 (PM)'}</strong></span>
-                </div>
-              </div>
 
             </div>
 
@@ -3665,6 +3630,106 @@ export default function App() {
               </button>
             </form>
           </div>
+
+              {/* Dynamic rotation queue dashboard view */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-8 space-y-3 text-xs text-slate-700 font-sans">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                    <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin-slow" />
+                    <span>🌀 臨床治療師四大輪替佇列</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRotationIndices({ am_regular: 0, pm_regular: 1, am_splint: 2, pm_splint: 3 })}
+                    className="text-[9px] text-slate-500 hover:text-slate-800 px-1 border border-slate-200 bg-white shadow-xs rounded"
+                  >
+                    重置
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {/* AM Regular */}
+                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'am_regular' ? 'bg-amber-50/50 border-amber-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
+                    <div className="flex justify-between items-center text-[10.5px]">
+                      <span>🌅 上午 住院/門診/中常</span>
+                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_regular')}</strong>
+                    </div>
+                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
+                      {rotationSequences.am_regular.map((id, idx) => {
+                        const name = therapists.find(t => t.id === id)?.name || id;
+                        const isNext = rotationIndices.am_regular === idx;
+                        return (
+                          <span key={idx} className={isNext ? 'bg-amber-100 text-amber-900 border border-amber-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* PM Regular */}
+                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'pm_regular' ? 'bg-indigo-50/50 border-indigo-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
+                    <div className="flex justify-between items-center text-[10.5px]">
+                      <span>🌇 下午 住院/門診/中常</span>
+                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_regular')}</strong>
+                    </div>
+                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
+                      {rotationSequences.pm_regular.map((id, idx) => {
+                        const name = therapists.find(t => t.id === id)?.name || id;
+                        const isNext = rotationIndices.pm_regular === idx;
+                        return (
+                          <span key={idx} className={isNext ? 'bg-indigo-100 text-indigo-900 border border-indigo-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* AM Splint */}
+                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'am_splint' ? 'bg-rose-50/50 border-rose-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
+                    <div className="flex justify-between items-center text-[10.5px]">
+                      <span>🌅 上午 副木製作</span>
+                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('am_splint')}</strong>
+                    </div>
+                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
+                      {rotationSequences.am_splint.map((id, idx) => {
+                        const name = therapists.find(t => t.id === id)?.name || id;
+                        const isNext = rotationIndices.am_splint === idx;
+                        return (
+                          <span key={idx} className={isNext ? 'bg-rose-100 text-rose-900 border border-rose-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* PM Splint */}
+                  <div className={`p-2 rounded-lg border text-[11px] ${getRotationHighlightKey() === 'pm_splint' ? 'bg-rose-50/50 border-rose-300 text-slate-900 font-medium' : 'bg-white border-slate-150 text-slate-600'}`}>
+                    <div className="flex justify-between items-center text-[10.5px]">
+                      <span>🌇 下午 副木製作</span>
+                      <strong className="text-indigo-600 font-bold">下位主角: {getNextTherapistInSeq('pm_splint')}</strong>
+                    </div>
+                    <div className="text-[9.5px] font-mono text-slate-400 mt-1 line-clamp-1 break-all">
+                      {rotationSequences.pm_splint.map((id, idx) => {
+                        const name = therapists.find(t => t.id === id)?.name || id;
+                        const isNext = rotationIndices.pm_splint === idx;
+                        return (
+                          <span key={idx} className={isNext ? 'bg-rose-100 text-rose-900 border border-rose-300 px-0.5 rounded font-black font-sans' : 'px-0.5 font-sans'}>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
+                  <span>登錄個案庫總數：<strong className="text-slate-700">{patients.length} 位</strong></span>
+                  <span>選取時段：<strong className="text-indigo-600 font-bold">{clerkTimeMode === 'AM' ? '🌅 上午 (AM)' : '🌇 下午 (PM)'}</strong></span>
+                </div>
+              </div>
 
           {/* 輪替序列編輯器 */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
