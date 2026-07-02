@@ -2375,9 +2375,6 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500">
-                符合「公平輪替 (Round-Robin)」與「複雜型個案佔雙格 (Double-Slot Weights)」演算法
-              </p>
             </div>
           </div>
 
