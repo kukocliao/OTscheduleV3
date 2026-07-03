@@ -15,8 +15,8 @@
    大動作前重讀一次。對話被壓縮過（開頭有 summary）→ 第一步就是重讀它。
 5. **改資料 schema（types.ts / localStorage key）必同步改 `src/migrations.ts`** 並 bump 版本，
    否則舊備份匯入會壞。
-6. **同一件事最多重試 2 輪**；連續同樣錯誤 = 方向錯，停下換路
-   （判準：`docs/agent-os/02-rubrics.md` 第 4 節）。
+6. **同一件事最多重試 2 輪**。錯誤重複出現時，先對照 `docs/agent-os/02-rubrics.md`
+   第 4 節的訊號清單（符合任兩項＝方向錯，停下換路，不要再試）。
 
 ## 按需路由表
 

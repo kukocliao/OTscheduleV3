@@ -22,8 +22,7 @@ context 滿了會自動摘要，摘要最常丟的是「使用者一開始要什
 
 **修法（照做）：**
 1. 任務超過 3 步，動工前先把以下三行寫進
-   `docs/agent-os/current-task.md`（覆寫即可，此檔不 commit，已列入 .gitignore 的話照舊；
-   若無 .gitignore 條目就 commit 也無妨）：
+   `docs/agent-os/current-task.md`（直接覆寫；本檔可以 commit，內容本來就是暫時的）：
    - 目標：使用者原話一句
    - 驗收：怎樣算完成（可驗證的條件，如「npm run lint 通過」「畫面上出現 X」）
    - 禁區：使用者說過不要動的東西

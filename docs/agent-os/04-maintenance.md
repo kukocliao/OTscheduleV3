@@ -11,8 +11,9 @@
 
 **改前先問使用者（用 AskUserQuestion 附 diff 摘要）：**
 - `CLAUDE.md` — 例外：純粹修正已失效的路徑/行數可直接改
-- `docs/agent-os/00-diagnosis.md`、`01-dispatch.md`、`02-rubrics.md`、`03-templates.md`
-  — 這些是制度本體，隨手改會讓規則彼此打架。例外：第 3 節的「事實過時」可直接改
+- `docs/agent-os/00-diagnosis.md`、`01-dispatch.md`、`02-rubrics.md`、`03-templates.md`、
+  `04-maintenance.md`（本檔）、`05-letter.md` — 制度本體，隨手改會讓規則彼此打架。
+  例外：僅限第 3 節明列的事實項目（只涉及 00-diagnosis 與 01-dispatch）可直接改
 - `.claude/skills/**` — 影響所有 session 的觸發行為
 
 **永遠不准 AI 自行動：**
@@ -44,10 +45,10 @@
 
 ## 4. 精簡時機
 
-- `lessons.md` 超過 **100 行**：把 >3 個月且已制度化的條目刪除（制度檔裡已有了），
-  未制度化的舊條目合併壓縮。
-- `CLAUDE.md` 超過 **150 行**：必砍。砍法：長內容抽到 `docs/agent-os/` 新檔，
-  CLAUDE.md 只留一行路由。
+- `lessons.md` 超過 **100 行**：移除「>3 個月且已制度化」的條目（制度檔裡已有了），
+  未制度化的舊條目合併壓縮。（移除條目 ≠ 刪除檔案，檔案本身永遠保留。）
+- `CLAUDE.md` 超過 **150 行**：必須精簡——長內容抽到 `docs/agent-os/` 新檔，
+  CLAUDE.md 只留一行路由。精簡屬結構性修改，執行前仍依第 1 節先問使用者。
 - `codebase-map.md` 超過 **200 行**：只保留「地圖」（哪裡有什麼），刪掉「說明」（為什麼）。
 - 任何制度檔超過 **150 行**：拆出「按需附錄」檔，主檔留判準與路由。
 
