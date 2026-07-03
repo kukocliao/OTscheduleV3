@@ -31,6 +31,9 @@ export interface ScheduleCell {
   patientId: string | null; // Occupied by patient ID (null if blank)
   isBlockedByLeave: boolean; // Dynamic block due to therapist leave
   isSystemBlocked: boolean; // Standard grey slots from excel template
+  // 該筆指派本身的排程日期（同一病歷號可能因重複住院在不同日期被不同治療師收案，
+  // 換日歸檔／月報表一律以此欄位為準，不可再共用病患身上單一的 scheduledDate）
+  scheduledDate?: string;
 }
 
 export interface TherapistLeave {

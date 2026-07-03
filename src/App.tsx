@@ -490,15 +490,11 @@ export default function App() {
     months.add('2026-06');
     months.add('2026-07');
     
-    patients.forEach(p => {
-      if (p.scheduledDate) {
-        const m = p.scheduledDate.substring(0, 7);
-        if (/^\d{4}-\d{2}$/.test(m)) {
-          // 只列出2026年6月及以後
-          if (m >= '2026-06') {
-            months.add(m);
-          }
-        }
+    scheduleCells.forEach(c => {
+      if (!c.scheduledDate) return;
+      const m = c.scheduledDate.substring(0, 7);
+      if (/^\d{4}-\d{2}$/.test(m) && m >= '2026-06') {
+        months.add(m);
       }
     });
 
@@ -509,7 +505,7 @@ export default function App() {
 
     // Sort descending so latest is on top, then backwards in history
     return Array.from(months).sort((a, b) => b.localeCompare(a));
-  }, [patients, archiveByMonth]);
+  }, [scheduleCells, archiveByMonth]);
   const [recommendedResult, setRecommendedResult] = useState<{
     therapist: Therapist;
     cellIds: string[];
@@ -592,7 +588,7 @@ export default function App() {
   useEffect(() => {
     const needsRollover = scheduleCells.some(c => {
       if (!c.patientId) return false;
-      const d = patientMap.get(c.patientId)?.scheduledDate;
+      const d = c.scheduledDate || patientMap.get(c.patientId)?.scheduledDate;
       return !!d && d < currentDateStr;
     });
     if (!needsRollover) return;
@@ -601,7 +597,7 @@ export default function App() {
       const toArchive: ArchivedAssignment[] = [];
       const updatedCells = scheduleCells.map(c => {
         const p = c.patientId ? patientMap.get(c.patientId) : null;
-        const d = p?.scheduledDate;
+        const d = c.scheduledDate || p?.scheduledDate;
         if (p && d && d < currentDateStr) {
           const therapistObj = therapistMap.get(c.therapistId);
           toArchive.push({
@@ -662,7 +658,7 @@ export default function App() {
       if (!c.patientId) return;
       const p = patientMap.get(c.patientId);
       if (!p) return;
-      const d = p.scheduledDate || '';
+      const d = c.scheduledDate || p.scheduledDate || '';
       if (!d.startsWith(month)) return;
       const therapistObj = therapistMap.get(c.therapistId);
       records.push({
@@ -711,6 +707,7 @@ export default function App() {
       therapistCode: string;
       slots: string;
       slotIndex: number;
+      scheduledDate: string;
     }> = [];
 
     const seenCombined = new Set<string>();
@@ -743,6 +740,7 @@ export default function App() {
           therapistCode: therapistObj?.code || '',
           slots: `第 ${cell.slotIndex < 100 ? cell.slotIndex + 1 : cell.slotIndex - 99} 診`,
           slotIndex: cell.slotIndex,
+          scheduledDate: cell.scheduledDate || patientObj.scheduledDate || new Date().toISOString().split('T')[0],
         });
       }
     });
@@ -953,7 +951,7 @@ export default function App() {
         // Return updated state
         return prev.map(c => {
           if (c.id === c1Id || c.id === c2Id) {
-            return { ...c, patientId: pId };
+            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr };
           }
           return c;
         });
@@ -968,7 +966,7 @@ export default function App() {
 
         return prev.map(c => {
           if (c.id === cellId) {
-            return { ...c, patientId: pId };
+            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr };
           }
           return c;
         });
@@ -1054,6 +1052,7 @@ export default function App() {
     }
 
     const slotIndexes = oldCells.map(c => c.slotIndex);
+    const oldDateBySlot = new Map(oldCells.map(c => [c.slotIndex, c.scheduledDate]));
     const newCellsToAssign: ScheduleCell[] = [];
     const occupiedInfo: string[] = [];
 
@@ -1123,7 +1122,7 @@ export default function App() {
           return { ...c, patientId: null };
         }
         if (targetIds.includes(c.id)) {
-          return { ...c, patientId: patientId };
+          return { ...c, patientId: patientId, scheduledDate: oldDateBySlot.get(c.slotIndex) ?? c.scheduledDate };
         }
         return c;
       });
@@ -1158,15 +1157,21 @@ export default function App() {
       return;
     }
 
+    const isMorningOld = origAmpm === 'AM';
+    const currentCells = scheduleCells.filter(c =>
+      c.patientId === patientId &&
+      c.category === origCategory &&
+      c.therapistId === therapistId &&
+      (isMorningOld ? c.slotIndex < 100 : c.slotIndex >= 100)
+    );
+    // 日期一律以「這筆指派自己的格子」為準，不再從病患共用欄位帶入
+    // （同一病歷號可能因重複住院同時存在另一筆不同日期的指派，不該互相污染）
+    const origDate = currentCells[0]?.scheduledDate || patientObj.scheduledDate || new Date().toISOString().split('T')[0];
+    const newDate = assignmentEdit.date || origDate;
+
     const moved = assignmentEdit.category !== origCategory || assignmentEdit.ampm !== origAmpm;
     if (moved) {
-      const isMorningOld = origAmpm === 'AM';
-      const oldCells = scheduleCells.filter(c =>
-        c.patientId === patientId &&
-        c.category === origCategory &&
-        c.therapistId === therapistId &&
-        (isMorningOld ? c.slotIndex < 100 : c.slotIndex >= 100)
-      );
+      const oldCells = currentCells;
       if (oldCells.length === 0) {
         setNotif({ message: '⚠️ 找不到對應的原指派紀錄！', type: 'error' });
         return;
@@ -1218,13 +1223,18 @@ export default function App() {
       const oldIds = oldCells.map(c => c.id);
       setScheduleCells(localCells.map(c =>
         oldIds.includes(c.id) ? { ...c, patientId: null }
-          : targetIds.includes(c.id) ? { ...c, patientId }
+          : targetIds.includes(c.id) ? { ...c, patientId, scheduledDate: newDate }
           : c
+      ));
+    } else if (newDate !== origDate && currentCells.length > 0) {
+      // 類別／時段不變，只改了日期：直接更新現有格子自己的日期即可，不需搬移
+      const currentIds = currentCells.map(c => c.id);
+      setScheduleCells(prev => prev.map(c =>
+        currentIds.includes(c.id) ? { ...c, scheduledDate: newDate } : c
       ));
     }
 
     const newName = assignmentEdit.patientName.trim() || `病患 ${newMedId}`;
-    const newDate = assignmentEdit.date || patientObj.scheduledDate;
     setPatients(prev => prev.map(p => p.id === patientId
       ? { ...p, medicalId: newMedId, name: newName, category: assignmentEdit.category, scheduledDate: newDate }
       : p));
@@ -1234,7 +1244,7 @@ export default function App() {
     if (newName !== patientObj.name) changes.push(`姓名 ${patientObj.name} → ${newName}`);
     if (assignmentEdit.category !== origCategory) changes.push(`類別 ${getCategoryLabel(origCategory)} → ${getCategoryLabel(assignmentEdit.category)}`);
     if (assignmentEdit.ampm !== origAmpm) changes.push(`時段 ${origAmpm === 'AM' ? '上午' : '下午'} → ${assignmentEdit.ampm === 'AM' ? '上午' : '下午'}`);
-    if (newDate !== patientObj.scheduledDate) changes.push(`日期 → ${newDate}`);
+    if (newDate !== origDate) changes.push(`日期 ${origDate} → ${newDate}`);
 
     if (changes.length > 0) {
       logAction('調整', newName, newMedId,
@@ -1453,7 +1463,7 @@ export default function App() {
     setScheduleCells(prev => {
       return prev.map(c => {
         if (recommendedResult.cellIds.includes(c.id)) {
-          return { ...c, patientId: pId };
+          return { ...c, patientId: pId, scheduledDate: clerkScheduleDate };
         }
         return c;
       });
@@ -1800,7 +1810,7 @@ export default function App() {
 
           return afterOriginFreed.map(c => {
             if (c.id === c1Id || c.id === c2Id) {
-              return { ...c, patientId: patientId };
+              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate };
             }
             return c;
           });
@@ -1814,7 +1824,7 @@ export default function App() {
 
           return afterOriginFreed.map(c => {
             if (c.id === targetCellId) {
-              return { ...c, patientId: patientId };
+              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate };
             }
             return c;
           });
@@ -1995,17 +2005,12 @@ export default function App() {
       `重置當期服務量 (${formattedMonth})`,
       `確認要重置並清空 ${formattedMonth} 所有的預約排班嗎？此動作將使 ${formattedMonth} 的臨床服務量歸零，並把格子完全重設為可用。`,
       () => {
-        // Determine which patient IDs are scheduled in this month
-        const targetPatientIds = new Set<string>();
-        patients.forEach(p => {
-          const pMonth = p.scheduledDate ? p.scheduledDate.substring(0, 7) : '2026-06';
-          if (pMonth === monthValue) {
-            targetPatientIds.add(p.id);
-          }
-        });
-
+        // 依「格子自己的日期」判斷是否屬於這個月份，避免同一病歷號另一筆不同月份的
+        // 指派（重複住院）被誤連坐清空
         setScheduleCells(prev => prev.map(c => {
-          if (c.patientId && targetPatientIds.has(c.patientId)) {
+          if (!c.patientId) return c;
+          const d = c.scheduledDate || patientMap.get(c.patientId)?.scheduledDate || '2026-06';
+          if (d.substring(0, 7) === monthValue) {
             return { ...c, patientId: null };
           }
           return c;
@@ -3082,7 +3087,7 @@ export default function App() {
                                   patientName: record.patientName,
                                   category: record.category,
                                   ampm: isMorning ? 'AM' : 'PM',
-                                  date: patientMap.get(record.patientId)?.scheduledDate || new Date().toISOString().split('T')[0]
+                                  date: record.scheduledDate
                                 })}
                                 className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                                 title="編輯指派"
