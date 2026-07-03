@@ -756,6 +756,46 @@ export default function App() {
     return pairs;
   }, [scheduleCells, patientMap, therapists]);
 
+  // 書記輸入病歷號時，比對系統既有資料（今日課表＋歷史歸檔），找出這位個案最近一次由誰診治
+  // 讓書記在確定指派前，能參考上次治療師以維持照護連續性（例如手動 Override 改回同一位）
+  const clerkLastAssignment = useMemo(() => {
+    const medId = clerkMedicalId.trim().toUpperCase();
+    if (!medId) return null;
+    const patientObj = patients.find(p => p.medicalId === medId);
+    if (!patientObj) return null;
+
+    type Rec = { date: string; therapistName: string; category: PatientCategory; ampm: 'AM' | 'PM' };
+    const records: Rec[] = [];
+
+    scheduleCells.forEach(c => {
+      if (c.patientId !== patientObj.id) return;
+      const d = c.scheduledDate || patientObj.scheduledDate;
+      if (!d) return;
+      records.push({
+        date: d,
+        therapistName: therapistMap.get(c.therapistId)?.name || '未知',
+        category: c.category,
+        ampm: c.slotIndex < 100 ? 'AM' : 'PM',
+      });
+    });
+
+    Object.entries(archiveByMonth).forEach(([, monthRecords]: [string, ArchivedAssignment[]]) => {
+      monthRecords.forEach(r => {
+        if (r.medicalId !== medId) return;
+        records.push({
+          date: r.date,
+          therapistName: r.therapistName,
+          category: r.category,
+          ampm: r.slotIndex < 100 ? 'AM' : 'PM',
+        });
+      });
+    });
+
+    if (records.length === 0) return null;
+    records.sort((a, b) => b.date.localeCompare(a.date));
+    return records[0];
+  }, [clerkMedicalId, patients, scheduleCells, archiveByMonth, therapistMap]);
+
   // List of patients currently waiting (unscheduled)
   const pendingPatients = useMemo(() => {
     return patients.filter(p => !scheduledPatientIdsList.has(p.id));
@@ -2738,6 +2778,15 @@ export default function App() {
                     className="w-full text-base lg:text-sm px-3 py-2 border border-slate-250 bg-slate-50 focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-slate-800"
                   />
                   <p className="text-[10px] text-slate-450 mt-1 text-slate-500">系統將自動轉換為「大寫英數字」</p>
+                  {clerkLastAssignment && (
+                    <div className="mt-2 flex items-start gap-1.5 text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      <ClipboardList className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        此病歷號最近一次（{clerkLastAssignment.date}）由 <strong>{clerkLastAssignment.therapistName}</strong> 診治
+                        （{getCategoryLabel(clerkLastAssignment.category)}・{clerkLastAssignment.ampm === 'AM' ? '上午' : '下午'}），如需維持照護連續性可用下方「手動更改指派治療師」改回同一位。
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
