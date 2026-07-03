@@ -31,6 +31,7 @@ import {
 import { Patient, Therapist, PatientCategory, ScheduleCell, TherapistLeave, LoggedSchedule, ArchivedAssignment, AppUser, AuditEntry } from './types';
 import { initialTherapists, initialPatients, initialLeaves, generateInitialSchedule, databaseSchema, pseudocodeContent } from './data';
 import { db, FIREBASE_CONFIGURED } from './firebase';
+import { CURRENT_SCHEMA_VERSION, migrateBackup } from './migrations';
 import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, deleteField, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
 // --- Custom Fixed Therapist Sequences based on user specification ---
@@ -1903,7 +1904,7 @@ export default function App() {
       }
     }
     const backup = {
-      app: 'OTscheduleV3', version: 1, exportedAt: new Date().toISOString(),
+      app: 'OTscheduleV3', version: CURRENT_SCHEMA_VERSION, exportedAt: new Date().toISOString(),
       patients, therapists, leaves, scheduleCells,
       therapistOrder, nextRotationIndex, rotationIndices, rotationSequences,
       appUsers, auditLog,
@@ -1929,6 +1930,7 @@ export default function App() {
         setNotif({ message: '⚠️ 檔案格式錯誤，不是有效的 JSON！', type: 'error' });
         return;
       }
+      if (data?.app === 'OTscheduleV3') data = migrateBackup(data);
       if (data?.app !== 'OTscheduleV3' || !Array.isArray(data.patients) || !Array.isArray(data.therapists) || !Array.isArray(data.scheduleCells)) {
         setNotif({ message: '⚠️ 這不是 OTscheduleV3 的備份檔！', type: 'error' });
         return;
