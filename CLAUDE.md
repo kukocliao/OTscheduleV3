@@ -12,9 +12,11 @@
 3. **大量讀取/掃描/批次改檔/驗證 → 派 subagent**，主對話只收結論。
    怎麼派：`docs/agent-os/01-dispatch.md`。
 4. **任務 >3 步先寫 `docs/agent-os/current-task.md`**（目標/驗收/禁區各一行），
-   大動作前重讀一次。對話被壓縮過（開頭有 summary）→ 第一步就是重讀它。
+   大動作前重讀一次。拿不準算不算 >3 步：會派 subagent 或不只一個 commit 就算，寫只花 30 秒。
+   對話被壓縮過（開頭有 summary）→ 第一步就是重讀它。
 5. **改資料 schema（types.ts / localStorage key）必同步改 `src/migrations.ts`** 並 bump 版本，
-   否則舊備份匯入會壞。
+   否則舊備份匯入會壞。**「移除/改名」既有類別或欄位＝政策＋資料兩重風險**——
+   動手前先過 `02-rubrics.md` 第 3 節（多半該先問使用者）。
 6. **同一件事最多重試 2 輪**。錯誤重複出現時，先對照 `docs/agent-os/02-rubrics.md`
    第 4 節的訊號清單（符合任兩項＝方向錯，停下換路，不要再試）。
 

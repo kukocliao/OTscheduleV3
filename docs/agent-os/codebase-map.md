@@ -50,6 +50,8 @@ src/
 ## 資料模型（src/types.ts，整檔僅 95 行可直接讀）
 
 - `PatientCategory` — 病患類別 union：住院/住院複雜/門診複雜/中度/輕度/副木
+  ⚠️ 「輕度(LIGHT)」為半廢棄狀態：type 仍在，但未納入課表初始化與 CSV/月報表統計、
+  UI 暫不開放選擇（見 App.tsx:4304 附近註解）。既有資料可能仍標記 LIGHT——動這個類別前先問使用者。
 - `Patient` / `Therapist` / `ScheduleCell`（排班格）/ `TherapistLeave`（請假區間）
 - `ArchivedAssignment` — 換日歸檔的去正規化紀錄（不依賴現存 patients/therapists）
 - `LoggedSchedule`（AUTO/MANUAL 日誌）/ `AppUser`（前台具名使用者）/ `AuditEntry`（稽核）
