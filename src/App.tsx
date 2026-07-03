@@ -2234,6 +2234,14 @@ export default function App() {
     });
   };
 
+  // 後台內直接變更「🔑 管理者」登入密碼（已通過後台驗證，故不需再次輸入舊密碼）
+  const handleChangeAdminPassword = async (newPwd: string) => {
+    const hash = await sha256(newPwd);
+    localStorage.setItem('admin_pwd_hash', hash);
+    setAdminPassword(hash);
+    setNotif({ message: '管理者密碼已更新！下次請用新密碼登入「🔑 管理者」。', type: 'success' });
+  };
+
   const handleVerifyAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const stored = adminPassword || '';
@@ -3955,7 +3963,45 @@ export default function App() {
             )}
           </div>
 
-          {/* 系統密碼管理 */}
+          {/* 管理者密碼管理 */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+              <Lock className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-extrabold text-slate-800 text-base">管理者密碼管理</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4 bg-slate-50 p-2.5 rounded border border-slate-100">
+              修改登入頁「🔑 管理者」選項使用的密碼（前後台一次通行）。變更後所有裝置須用新密碼重新登入。
+            </p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const newPwd = (form.elements.namedItem('newAdminPwd') as HTMLInputElement).value.trim();
+              const confirmPwd = (form.elements.namedItem('confirmAdminPwd') as HTMLInputElement).value.trim();
+              if (!newPwd) { setNotif({ message: '密碼不可為空！', type: 'error' }); return; }
+              if (newPwd !== confirmPwd) { setNotif({ message: '兩次輸入的密碼不一致！', type: 'error' }); return; }
+              handleChangeAdminPassword(newPwd);
+              form.reset();
+            }} className="flex flex-col sm:flex-row gap-3 max-w-md">
+              <input
+                name="newAdminPwd"
+                type="password"
+                placeholder="新密碼"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <input
+                name="confirmAdminPwd"
+                type="password"
+                placeholder="確認新密碼"
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer shrink-0">
+                更新密碼
+              </button>
+            </form>
+          </div>
+
+          {/* 系統密碼管理（僅在尚未建立任何使用者時才會用到，建立使用者後前台登入一律改用使用者密碼） */}
+          {appUsers.length === 0 && (
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
             <div className="flex items-center gap-2 mb-4 pb-2 border-b">
               <Lock className="w-5 h-5 text-indigo-600" />
@@ -3993,6 +4039,7 @@ export default function App() {
               </button>
             </form>
           </div>
+          )}
 
           {/* 資料備份與還原 */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mt-8">
