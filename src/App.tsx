@@ -149,6 +149,11 @@ export default function App() {
   const [editTherapistName, setEditTherapistName] = useState<string>('');
   const [editTherapistCode, setEditTherapistCode] = useState<string>('');
 
+  // --- Inline Edit state for App Users（改名/改密碼需按「確定修改」才生效） ---
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editUserName, setEditUserName] = useState<string>('');
+  const [editUserPassword, setEditUserPassword] = useState<string>('');
+
   // --- Inline Edit state for Patients ---
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
   const [editPatientName, setEditPatientName] = useState<string>('');
@@ -2103,6 +2108,28 @@ export default function App() {
     });
   };
 
+  const handleStartEditUser = (u: AppUser) => {
+    setEditingUserId(u.id);
+    setEditUserName(u.name);
+    setEditUserPassword(u.password);
+  };
+
+  const handleSaveUserEdit = (id: string) => {
+    const name = editUserName.trim();
+    const pwd = editUserPassword.trim();
+    if (!name || !pwd) {
+      setNotif({ message: '使用者名稱與密碼皆不可為空！', type: 'error' });
+      return;
+    }
+    if (appUsers.some(u => u.id !== id && u.name === name)) {
+      setNotif({ message: '已有同名使用者！', type: 'error' });
+      return;
+    }
+    setAppUsers(prev => prev.map(u => u.id === id ? { ...u, name, password: pwd } : u));
+    setEditingUserId(null);
+    setNotif({ message: `使用者「${name}」的資料已確定修改！`, type: 'success' });
+  };
+
 
 
   const handleSetSitePassword = (e: React.FormEvent) => {
@@ -3767,34 +3794,67 @@ export default function App() {
               {appUsers.length === 0 && (
                 <p className="text-xs text-slate-400">尚未建立任何使用者（目前沿用系統密碼登入）。</p>
               )}
-              {appUsers.map(u => (
-                <div key={u.id} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                  <input
-                    type="text"
-                    value={u.name}
-                    onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, name: e.target.value } : x))}
-                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    placeholder="使用者名稱"
-                  />
-                  <input
-                    type="text"
-                    value={u.password}
-                    onChange={e => setAppUsers(prev => prev.map(x => x.id === u.id ? { ...x, password: e.target.value } : x))}
-                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    placeholder="密碼"
-                  />
-                  <button
-                    onClick={() => triggerConfirm(
-                      '刪除使用者',
-                      `確定要刪除使用者「${u.name}」嗎？該使用者將無法再登入系統。`,
-                      () => setAppUsers(prev => prev.filter(x => x.id !== u.id))
-                    )}
-                    className="px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                  >
-                    刪除
-                  </button>
-                </div>
-              ))}
+              {appUsers.map(u => {
+                const isEditing = editingUserId === u.id;
+                if (isEditing) {
+                  return (
+                    <div key={u.id} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center p-2.5 border border-indigo-200 bg-indigo-50/20 rounded-lg">
+                      <input
+                        type="text"
+                        value={editUserName}
+                        onChange={e => setEditUserName(e.target.value)}
+                        className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        placeholder="使用者名稱"
+                      />
+                      <input
+                        type="text"
+                        value={editUserPassword}
+                        onChange={e => setEditUserPassword(e.target.value)}
+                        className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-base sm:text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        placeholder="密碼"
+                      />
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={() => setEditingUserId(null)}
+                          className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={() => handleSaveUserEdit(u.id)}
+                          className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer"
+                        >
+                          確定修改
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={u.id} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                    <div className="flex-1 px-3 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-800 font-bold">{u.name}</div>
+                    <div className="flex-1 px-3 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-500 font-mono">{u.password}</div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleStartEditUser(u)}
+                        className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1"
+                      >
+                        <Edit className="w-3 h-3" /> 修改
+                      </button>
+                      <button
+                        onClick={() => triggerConfirm(
+                          '刪除使用者',
+                          `確定要刪除使用者「${u.name}」嗎？該使用者將無法再登入系統。`,
+                          () => setAppUsers(prev => prev.filter(x => x.id !== u.id))
+                        )}
+                        className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                      >
+                        刪除
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <form onSubmit={(e) => {
               e.preventDefault();
