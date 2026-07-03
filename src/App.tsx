@@ -519,6 +519,19 @@ export default function App() {
     seqKey?: string;
   } | null>(null);
 
+  // --- 前台「編輯指派」小視窗（改病歷號/姓名/類別/時段/日期） ---
+  const [assignmentEdit, setAssignmentEdit] = useState<{
+    patientId: string;
+    therapistId: string;
+    origCategory: PatientCategory;
+    origAmpm: 'AM' | 'PM';
+    medicalId: string;
+    patientName: string;
+    category: PatientCategory;
+    ampm: 'AM' | 'PM';
+    date: string;
+  } | null>(null);
+
   // --- Dynamic Form States (for creating/editing patients & leaves) ---
   const [newPatient, setNewPatient] = useState<Omit<Patient, 'id'>>({
     name: '',
@@ -1126,6 +1139,109 @@ export default function App() {
     });
     logAction('調整', patientName, patientMap.get(patientId)?.medicalId || '', newName,
       `由 ${oldName} 改為 ${newName}（${ampm === 'AM' ? '上午' : '下午'}）`);
+  };
+
+  // 前台編輯指派：改病歷號/姓名/類別/時段/日期（類別或時段變更時搬移格子）
+  const handleSaveAssignmentEdit = () => {
+    if (!assignmentEdit) return;
+    const { patientId, therapistId, origCategory, origAmpm } = assignmentEdit;
+    const patientObj = patientMap.get(patientId);
+    if (!patientObj) return;
+
+    const newMedId = assignmentEdit.medicalId.trim().toUpperCase();
+    if (!newMedId) {
+      setNotif({ message: '⚠️ 病歷號不可為空！', type: 'error' });
+      return;
+    }
+    if (patients.some(p => p.id !== patientId && p.medicalId === newMedId)) {
+      setNotif({ message: `⚠️ 病歷號 ${newMedId} 已存在於另一位個案，請確認！`, type: 'error' });
+      return;
+    }
+
+    const moved = assignmentEdit.category !== origCategory || assignmentEdit.ampm !== origAmpm;
+    if (moved) {
+      const isMorningOld = origAmpm === 'AM';
+      const oldCells = scheduleCells.filter(c =>
+        c.patientId === patientId &&
+        c.category === origCategory &&
+        c.therapistId === therapistId &&
+        (isMorningOld ? c.slotIndex < 100 : c.slotIndex >= 100)
+      );
+      if (oldCells.length === 0) {
+        setNotif({ message: '⚠️ 找不到對應的原指派紀錄！', type: 'error' });
+        return;
+      }
+
+      let localCells = [...scheduleCells];
+      const problems: string[] = [];
+      const targetIds: string[] = [];
+      for (const oc of oldCells) {
+        const sIdx = assignmentEdit.ampm === origAmpm
+          ? oc.slotIndex
+          : (oc.slotIndex < 100 ? oc.slotIndex + 100 : oc.slotIndex - 100);
+        let target = localCells.find(c =>
+          c.category === assignmentEdit.category &&
+          c.slotIndex === sIdx &&
+          c.therapistId === therapistId
+        );
+        if (!target) {
+          const isM = sIdx < 100;
+          const displaySlot = isM ? sIdx + 1 : sIdx - 99;
+          target = {
+            id: `${assignmentEdit.category}-S${sIdx}-${therapistId}`,
+            category: assignmentEdit.category,
+            slotIndex: sIdx,
+            slotLabel: isM ? `上午診 第 ${displaySlot} 診` : `下午診 第 ${displaySlot} 診`,
+            therapistId,
+            patientId: null,
+            isBlockedByLeave: false,
+            isSystemBlocked: false
+          };
+          localCells.push(target);
+        }
+        const displaySlot = sIdx < 100 ? sIdx + 1 : sIdx - 99;
+        if (target.patientId !== null && target.patientId !== patientId) {
+          problems.push(`第 ${displaySlot} 診已被其他個案佔用`);
+        } else if (target.isBlockedByLeave) {
+          problems.push(`第 ${displaySlot} 診該治療師請假中`);
+        } else if (target.isSystemBlocked) {
+          problems.push(`第 ${displaySlot} 診為系統行政禁行時段`);
+        } else {
+          targetIds.push(target.id);
+        }
+      }
+      if (problems.length > 0) {
+        setNotif({ message: `⚠️ 無法變更：${problems.join('、')}`, type: 'error' });
+        return;
+      }
+
+      const oldIds = oldCells.map(c => c.id);
+      setScheduleCells(localCells.map(c =>
+        oldIds.includes(c.id) ? { ...c, patientId: null }
+          : targetIds.includes(c.id) ? { ...c, patientId }
+          : c
+      ));
+    }
+
+    const newName = assignmentEdit.patientName.trim() || `病患 ${newMedId}`;
+    const newDate = assignmentEdit.date || patientObj.scheduledDate;
+    setPatients(prev => prev.map(p => p.id === patientId
+      ? { ...p, medicalId: newMedId, name: newName, category: assignmentEdit.category, scheduledDate: newDate }
+      : p));
+
+    const changes: string[] = [];
+    if (newMedId !== patientObj.medicalId) changes.push(`病歷號 ${patientObj.medicalId} → ${newMedId}`);
+    if (newName !== patientObj.name) changes.push(`姓名 ${patientObj.name} → ${newName}`);
+    if (assignmentEdit.category !== origCategory) changes.push(`類別 ${getCategoryLabel(origCategory)} → ${getCategoryLabel(assignmentEdit.category)}`);
+    if (assignmentEdit.ampm !== origAmpm) changes.push(`時段 ${origAmpm === 'AM' ? '上午' : '下午'} → ${assignmentEdit.ampm === 'AM' ? '上午' : '下午'}`);
+    if (newDate !== patientObj.scheduledDate) changes.push(`日期 → ${newDate}`);
+
+    if (changes.length > 0) {
+      logAction('調整', newName, newMedId,
+        therapistMap.get(therapistId)?.name || '', `編輯指派：${changes.join('、')}`);
+      setNotif({ message: `✏️ 已更新 ${newName} 的指派內容（${changes.join('、')}）。`, type: 'success' });
+    }
+    setAssignmentEdit(null);
   };
 
   // --- Simplified Clerk Handlers & UI Interactions ---
@@ -2915,7 +3031,7 @@ export default function App() {
                         <th className="py-2 px-3">個案病歷 (姓名)</th>
                         <th className="py-2 px-3">類別</th>
                         <th className="py-2 px-3">治療師</th>
-                        <th className="py-2 px-3 text-center w-12">操作</th>
+                        <th className="py-2 px-3 text-center w-20">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2955,7 +3071,24 @@ export default function App() {
                                 ))}
                               </select>
                             </td>
-                            <td className="py-2.5 px-3 text-center">
+                            <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                              <button
+                                onClick={() => setAssignmentEdit({
+                                  patientId: record.patientId,
+                                  therapistId: record.therapistId,
+                                  origCategory: record.category,
+                                  origAmpm: isMorning ? 'AM' : 'PM',
+                                  medicalId: record.medicalId,
+                                  patientName: record.patientName,
+                                  category: record.category,
+                                  ampm: isMorning ? 'AM' : 'PM',
+                                  date: patientMap.get(record.patientId)?.scheduledDate || new Date().toISOString().split('T')[0]
+                                })}
+                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                title="編輯指派"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={() => handleRemoveAssignment(record.cellId)}
                                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
@@ -3958,6 +4091,94 @@ export default function App() {
           </p>
         </div>
       </footer>
+
+      {assignmentEdit && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-xl max-w-sm w-full overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                <Edit className="w-4.5 h-4.5" />
+              </span>
+              <h4 className="font-extrabold text-slate-800 text-sm">編輯指派內容</h4>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">病歷號</label>
+                <input
+                  type="text"
+                  value={assignmentEdit.medicalId}
+                  onChange={(e) => setAssignmentEdit({ ...assignmentEdit, medicalId: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">病人姓名</label>
+                <input
+                  type="text"
+                  value={assignmentEdit.patientName}
+                  onChange={(e) => setAssignmentEdit({ ...assignmentEdit, patientName: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">類別</label>
+                  <select
+                    value={assignmentEdit.category}
+                    onChange={(e) => setAssignmentEdit({ ...assignmentEdit, category: e.target.value as PatientCategory })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-base sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                  >
+                    {(['INPATIENT_COMPLEX', 'OUTPATIENT_COMPLEX', 'INPATIENT', 'MODERATE', 'LIGHT', 'SPLINT'] as PatientCategory[]).map(cat => (
+                      <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">時段</label>
+                  <select
+                    value={assignmentEdit.ampm}
+                    onChange={(e) => setAssignmentEdit({ ...assignmentEdit, ampm: e.target.value as 'AM' | 'PM' })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-base sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="AM">🌅 上午</option>
+                    <option value="PM">🌇 下午</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">📅 排程日期</label>
+                <input
+                  type="date"
+                  value={assignmentEdit.date}
+                  onChange={(e) => setAssignmentEdit({ ...assignmentEdit, date: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                變更類別或時段時，系統會將個案搬移至同治療師對應的空格；若目標格已被佔用或禁行將提示錯誤。要更換治療師請直接使用課表列上的下拉選單。
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAssignmentEdit(null)}
+                className="px-3 py-1.5 text-xs font-extrabold text-slate-500 bg-slate-50 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAssignmentEdit}
+                className="px-4 py-1.5 text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer shadow-xs transition-colors"
+              >
+                儲存變更
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDialog && confirmDialog.isOpen && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
