@@ -617,7 +617,8 @@ export default function App() {
             therapistCode: therapistObj?.code || '',
             therapistName: therapistObj?.name || '未知',
             slotIndex: c.slotIndex,
-            archivedAt: new Date().toISOString()
+            archivedAt: new Date().toISOString(),
+            userName: c.assignedBy || '管理者'
           });
           return { ...c, patientId: null };
         }
@@ -678,7 +679,8 @@ export default function App() {
         therapistCode: therapistObj?.code || '',
         therapistName: therapistObj?.name || '未知',
         slotIndex: c.slotIndex,
-        archivedAt: ''
+        archivedAt: '',
+        userName: c.assignedBy || '管理者'
       });
     });
     return records;
@@ -997,7 +999,7 @@ export default function App() {
         // Return updated state
         return prev.map(c => {
           if (c.id === c1Id || c.id === c2Id) {
-            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr };
+            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr, assignedBy: currentUserName || '管理者' };
           }
           return c;
         });
@@ -1012,7 +1014,7 @@ export default function App() {
 
         return prev.map(c => {
           if (c.id === cellId) {
-            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr };
+            return { ...c, patientId: pId, scheduledDate: patientObj.scheduledDate || todayStr, assignedBy: currentUserName || '管理者' };
           }
           return c;
         });
@@ -1099,6 +1101,7 @@ export default function App() {
 
     const slotIndexes = oldCells.map(c => c.slotIndex);
     const oldDateBySlot = new Map(oldCells.map(c => [c.slotIndex, c.scheduledDate]));
+    const oldAssignedByBySlot = new Map(oldCells.map(c => [c.slotIndex, c.assignedBy]));
     const newCellsToAssign: ScheduleCell[] = [];
     const occupiedInfo: string[] = [];
 
@@ -1168,7 +1171,7 @@ export default function App() {
           return { ...c, patientId: null };
         }
         if (targetIds.includes(c.id)) {
-          return { ...c, patientId: patientId, scheduledDate: oldDateBySlot.get(c.slotIndex) ?? c.scheduledDate };
+          return { ...c, patientId: patientId, scheduledDate: oldDateBySlot.get(c.slotIndex) ?? c.scheduledDate, assignedBy: oldAssignedByBySlot.get(c.slotIndex) || currentUserName || '管理者' };
         }
         return c;
       });
@@ -1269,7 +1272,7 @@ export default function App() {
       const oldIds = oldCells.map(c => c.id);
       setScheduleCells(localCells.map(c =>
         oldIds.includes(c.id) ? { ...c, patientId: null }
-          : targetIds.includes(c.id) ? { ...c, patientId, scheduledDate: newDate }
+          : targetIds.includes(c.id) ? { ...c, patientId, scheduledDate: newDate, assignedBy: currentUserName || '管理者' }
           : c
       ));
     } else if (newDate !== origDate && currentCells.length > 0) {
@@ -1509,7 +1512,7 @@ export default function App() {
     setScheduleCells(prev => {
       return prev.map(c => {
         if (recommendedResult.cellIds.includes(c.id)) {
-          return { ...c, patientId: pId, scheduledDate: clerkScheduleDate };
+          return { ...c, patientId: pId, scheduledDate: clerkScheduleDate, assignedBy: currentUserName || '管理者' };
         }
         return c;
       });
@@ -1856,7 +1859,7 @@ export default function App() {
 
           return afterOriginFreed.map(c => {
             if (c.id === c1Id || c.id === c2Id) {
-              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate };
+              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate, assignedBy: sourceCell.assignedBy || currentUserName || '管理者' };
             }
             return c;
           });
@@ -1870,7 +1873,7 @@ export default function App() {
 
           return afterOriginFreed.map(c => {
             if (c.id === targetCellId) {
-              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate };
+              return { ...c, patientId: patientId, scheduledDate: sourceCell.scheduledDate, assignedBy: sourceCell.assignedBy || currentUserName || '管理者' };
             }
             return c;
           });
@@ -1984,7 +1987,7 @@ export default function App() {
     csvContent += `報表日期,${statsMonthLabel} (當月自動/手動統計資料)\r\n`;
     csvContent += `列印時間,${new Date().toLocaleString()}\r\n\r\n`;
 
-    csvContent += '個案類別,時段,治療師代碼,治療師姓名,個案名字,個案病歷號,緊急度,排程日期\r\n';
+    csvContent += '個案類別,時段,治療師代碼,治療師姓名,個案名字,個案病歷號,緊急度,排程日期,指派使用者\r\n';
 
     // 從「歸檔記錄 + 今日課表」取得本月所有排班，依類別、日期、診次排序輸出
     const categories: PatientCategory[] = ['INPATIENT', 'INPATIENT_COMPLEX', 'OUTPATIENT_COMPLEX', 'MODERATE', 'SPLINT'];
@@ -1997,7 +2000,7 @@ export default function App() {
       catRecords.forEach(r => {
         const catName = getCategoryLabel(cat);
         const periodName = r.slotIndex < 100 ? '上午' : '下午';
-        csvContent += `"${catName}","${periodName}","${r.therapistCode}","${r.therapistName}","${r.patientName}","${r.medicalId}","${r.urgency}","${r.date}"\r\n`;
+        csvContent += `"${catName}","${periodName}","${r.therapistCode}","${r.therapistName}","${r.patientName}","${r.medicalId}","${r.urgency}","${r.date}","${r.userName || '管理者'}"\r\n`;
       });
     });
 

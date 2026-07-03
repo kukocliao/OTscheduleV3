@@ -34,6 +34,8 @@ export interface ScheduleCell {
   // 該筆指派本身的排程日期（同一病歷號可能因重複住院在不同日期被不同治療師收案，
   // 換日歸檔／月報表一律以此欄位為準，不可再共用病患身上單一的 scheduledDate）
   scheduledDate?: string;
+  // 這筆指派是誰做的；使用者制上線前的舊資料沒有這個欄位，讀取時一律 fallback 為「管理者」
+  assignedBy?: string;
 }
 
 export interface TherapistLeave {
@@ -57,6 +59,8 @@ export interface ArchivedAssignment {
   therapistName: string;
   slotIndex: number;     // <100 上午、>=100 下午
   archivedAt: string;    // 歸檔時間 ISO
+  // 這筆指派是誰做的；使用者制上線前的舊歸檔沒有這個欄位，讀取時一律 fallback 為「管理者」
+  userName?: string;
 }
 
 export interface LoggedSchedule {
