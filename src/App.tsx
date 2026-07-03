@@ -470,24 +470,24 @@ export default function App() {
     return monthStr >= '2026-06' ? monthStr : '2026-06';
   });
 
-  // 按需從 Firestore 載入所選月份的歸檔記錄（若本地快取已有則跳過）
-  useEffect(() => {
+  // 從 Firestore 載入指定月份的歸檔記錄（若本地快取已有則跳過）
+  const loadArchiveMonth = (month: string) => {
     if (!FIREBASE_CONFIGURED || !db) return;
-    if (loadedFirebaseArchiveMonths.current.has(statsMonth)) return;
-    loadedFirebaseArchiveMonths.current.add(statsMonth);
-    getDoc(doc(db, 'scheduleApp', `archive_${statsMonth}`)).then(snap => {
+    if (loadedFirebaseArchiveMonths.current.has(month)) return;
+    loadedFirebaseArchiveMonths.current.add(month);
+    getDoc(doc(db, 'scheduleApp', `archive_${month}`)).then(snap => {
       if (!snap.exists()) return;
       const data = snap.data();
       if (!Array.isArray(data.records)) return;
       const remoteRecords = data.records as ArchivedAssignment[];
       setArchiveByMonth(prev => {
-        const existing = prev[statsMonth] || [];
+        const existing = prev[month] || [];
         const seen = new Set(existing.map(r => r.id));
         const merged = [...existing, ...remoteRecords.filter(r => !seen.has(r.id))];
-        return { ...prev, [statsMonth]: merged };
+        return { ...prev, [month]: merged };
       });
     }).catch(console.error);
-  }, [statsMonth]);
+  };
 
   // Dynamically compile the list of uniquely selectable months starting strictly from June 2026
   const availableMonths = useMemo(() => {
@@ -512,6 +512,12 @@ export default function App() {
     // Sort descending so latest is on top, then backwards in history
     return Array.from(months).sort((a, b) => b.localeCompare(a));
   }, [scheduleCells, archiveByMonth]);
+
+  // 月報表清單會同時顯示所有可選月份的服務量，所以每個月份都要載入歸檔資料，
+  // 不能只載入目前選取的 statsMonth，否則未點開過的月份會誤顯示 0（看起來像資料不見）
+  useEffect(() => {
+    availableMonths.forEach(loadArchiveMonth);
+  }, [availableMonths]);
   const [recommendedResult, setRecommendedResult] = useState<{
     therapist: Therapist;
     cellIds: string[];
