@@ -4129,7 +4129,8 @@ export default function App() {
                     onChange={(e) => setAssignmentEdit({ ...assignmentEdit, category: e.target.value as PatientCategory })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-base sm:text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
                   >
-                    {(['INPATIENT_COMPLEX', 'OUTPATIENT_COMPLEX', 'INPATIENT', 'MODERATE', 'LIGHT', 'SPLINT'] as PatientCategory[]).map(cat => (
+                    {/* 輕度(LIGHT) 未納入課表格子初始化與 CSV/月報表統計，暫不開放選擇，避免資料在報表中消失 */}
+                    {(['INPATIENT_COMPLEX', 'OUTPATIENT_COMPLEX', 'INPATIENT', 'MODERATE', 'SPLINT'] as PatientCategory[]).map(cat => (
                       <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
                     ))}
                   </select>
