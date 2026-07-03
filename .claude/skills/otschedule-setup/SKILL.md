@@ -10,139 +10,99 @@ description: >
 
 # OTscheduleV3 客製化引導
 
+## 給 Claude 的前置提醒
+
+- 動程式碼前先讀 `docs/agent-os/codebase-map.md`；**勿整檔讀 `src/App.tsx`（4391 行）**，
+  用 Grep 定位＋Read offset/limit。其他鐵律見專案根目錄 `CLAUDE.md`。
+- **本系統的資料存在 localStorage / Firestore，程式碼裡的清單只是「全新安裝的初始值」。**
+  所以改治療師、輪替順序，一律優先引導使用者用後台 UI；改程式碼對已在使用中的
+  系統通常「看不到效果」，這是最常見的誤區。
+
 ## 專案概覽
 
-**GitHub:** https://github.com/kukocliao/OTscheduleV3  
-**線上展示:** https://ot-schedule-v3.vercel.app  
-**技術棧:** React 19 + Vite + TypeScript + TailwindCSS + Firebase Firestore  
+**GitHub:** https://github.com/kukocliao/OTscheduleV3
+**線上展示:** https://ot-schedule-v3.vercel.app
+**技術棧:** React 19 + Vite + TypeScript + TailwindCSS + Firebase Firestore
 **部署平台:** Vercel（免費方案即可）
 
-這是一套給職能治療師使用的排班管理系統，支援：
-- 前台書記快速指派（輸入病歷號 → 系統自動推薦治療師）
-- 公平輪替演算法（Round-Robin）
-- Firebase 雲端即時同步（多裝置共用）
-- 請假管理、CSV 匯出
+給職能治療師的排班管理系統：前台書記快速指派（輸入病歷號 → 自動推薦治療師）、
+公平輪替演算法（Round-Robin）、Firebase 雲端即時同步、請假管理、CSV 匯出、
+後台管理（治療師/使用者/輪替序列/備份還原）。
 
 ---
 
-## 關鍵設定檔位置
+## 1. 修改治療師（後台 UI 優先）
 
-```
-src/
-├── types.ts        ← 治療類別定義（PatientCategory）
-├── data.ts         ← 治療師初始清單、排程產生邏輯
-└── App.tsx         ← 輪替順序（ROTATION_SEQUENCES）
-```
+**正路：後台 → 「治療師資料管理」**——新增、修改、停用治療師都在這裡操作，
+立即生效並同步到 localStorage/Firestore。改完提醒使用者到「輪替序列設定」
+把新治療師加入輪替（見第 2 節）。
 
----
+**程式碼路徑（僅影響「全新安裝」的初始值）：`src/data.ts` 的 `initialTherapists`**
 
-## 1. 修改治療師
-
-**檔案：`src/data.ts`**
-
-```typescript
-export const initialTherapists: Therapist[] = [
-  { id: 't1', name: '趙長宥', code: 'OT', color: 'emerald', isActive: true },
-  { id: 't2', name: '潘亮全', code: 'OU', color: 'blue',    isActive: true },
-  { id: 't3', name: '姜壯坤', code: 'OV', color: 'indigo',  isActive: true },
-  { id: 't4', name: '蘇柏臻', code: 'OB', color: 'purple',  isActive: true },
-  { id: 't5', name: '邱申棟', code: 'OC', color: 'pink',    isActive: true },
-];
-```
-
-**欄位說明：**
 | 欄位 | 說明 | 範例 |
 |------|------|------|
 | `id` | 唯一識別碼，不可重複，輪替序列會用到 | `'t1'` |
 | `name` | 治療師中文姓名 | `'王小明'` |
-| `code` | 縮寫代號（顯示在排班格上） | `'OT'` |
-| `color` | Tailwind 顏色名稱 | `'emerald'` / `'blue'` / `'rose'` / `'amber'` / `'violet'` |
+| `code` | 縮寫代號（顯示在排班格上，建議 2-3 字元） | `'OT'` |
+| `color` | Tailwind 顏色名稱 | `'emerald'` / `'blue'` / `'rose'` |
 | `isActive` | 是否啟用（false 則不排班） | `true` |
 
-**新增治療師步驟：**
-1. 在陣列加一筆，`id` 用 `'t6'`、`'t7'` 依序遞增
-2. 同步更新 `App.tsx` 的 `ROTATION_SEQUENCES`，把新 id 加進輪替序列
+判斷用哪條路：使用者已在用系統（有排班資料）→ 後台 UI；
+正在準備第一次部署、還沒有任何資料 → 改 `data.ts` 也可以。
 
 ---
 
-## 2. 修改輪替順序
+## 2. 修改輪替順序（後台 UI 優先）
 
-**檔案：`src/App.tsx`，約第 36 行**
+**正路：後台 → 「輪替序列設定」**——四條佇列（上午/下午 × 一般/副木）都可直接編輯，
+立即生效。序列中治療師可重複出現（代表該治療師排班次數較多）；
+不參與副木的治療師就不要放進副木序列。
 
-```typescript
-export const ROTATION_SEQUENCES: Record<string, string[]> = {
-  am_regular: ['t1', 't2', 't3', 't4', ...],  // 上午：住院/門診/中常
-  pm_regular: ['t1', 't5', 't3', 't4', ...],  // 下午：住院/門診/中常
-  am_splint:  ['t1', 't2', 't3', 't4', ...],  // 上午：副木
-  pm_splint:  ['t1', 't5', 't3', 't4', ...],  // 下午：副木
-};
-```
-
-**說明：**
-- 陣列裡的順序就是輪替順序，可以重複（代表某治療師排班次數較多）
-- 如果某治療師不參與副木，就不要放進 `am_splint` / `pm_splint`
-- 新增治療師後，把他的 `id` 插入適當位置
+**程式碼路徑（僅初始值）：`src/App.tsx` 第 39 行的 `DEFAULT_ROTATION_SEQUENCES`**
+（keys：`am_regular` / `pm_regular` / `am_splint` / `pm_splint`，內容是治療師 id 陣列）。
+注意：實際生效值是 state `rotationSequences`（存 localStorage/Firestore），
+`DEFAULT_` 只是空值時的 fallback——改它不會影響使用中的系統。
+後台編輯器也有「還原為預設值」按鈕會讀取它。
 
 ---
 
-## 3. 修改治療類別
+## 3. 修改治療類別（必動程式碼，屬進階改動）
 
-**檔案：`src/types.ts`**
+**檔案：`src/types.ts` 的 `PatientCategory`**（現有：INPATIENT 住院 /
+INPATIENT_COMPLEX 住院複雜 / OUTPATIENT_COMPLEX 門診複雜 / MODERATE 中度 /
+LIGHT 輕度 / SPLINT 副木）。
 
-```typescript
-export type PatientCategory =
-  | 'INPATIENT'          // 住院病人
-  | 'INPATIENT_COMPLEX'  // 住院複雜
-  | 'OUTPATIENT_COMPLEX' // 門診複雜
-  | 'MODERATE'           // 中度
-  | 'LIGHT'              // 輕度
-  | 'SPLINT';            // 副木
-```
-
-**注意：** 修改 PatientCategory 後，需一併更新：
-- `src/data.ts` 的 `generateInitialSchedule` 裡的 `categories` 陣列
-- `src/App.tsx` 中所有 switch/case 或顯示文字的地方（搜尋 `getCategoryLabel`）
+修改後**必須**一併處理，缺一會壞：
+1. `src/data.ts` 的 `generateInitialSchedule` 裡的 categories
+2. `src/App.tsx` 所有顯示與判斷處（Grep `getCategoryLabel`、`getCategoryColorClass` 及該類別字串）
+3. `src/migrations.ts` 加 migration 並 bump 版本（舊備份/舊 localStorage 含舊類別值）
+4. 類別的優先順序屬院方政策——不確定就問使用者，不要自行發明
 
 ---
 
 ## 4. Firebase 雲端同步設定
 
-讓不同裝置的排班資料即時同步，需要建立自己的 Firebase 專案。
+> ⚠️ **安全警告（先講清楚再動手）**：排班資料包含**病歷號**。下面教學用的
+> 「測試模式」規則等於一個**任何知道專案 ID 的人都能讀寫**的公開資料庫，
+> 只適合試用階段。而本系統目前**沒有內建登入驗證機制**，無法只靠改規則做到
+> 真正的存取控制——若要正式多人使用，請使用者開一個任務給 Claude：
+> 「加上 Firebase Auth（匿名或帳號登入）並收緊 Firestore 規則」。
+> 試用期間至少做到：不放真實病歷號，或接受此風險。
 
 ### Step 1：建立 Firebase 專案
-1. 前往 https://console.firebase.google.com
-2. 建立新專案（名稱自訂）
-3. 左側選 **Firestore Database** → 建立 → 選**測試模式** → 位置選 `asia-east1 (Taiwan)`
+1. https://console.firebase.google.com → 建立新專案
+2. 左側 **Firestore Database** → 建立 → 選測試模式 → 位置 `asia-east1 (Taiwan)`
+   （測試模式規則 30 天後自動到期封鎖，到期前要處理上面的安全警告）
 
 ### Step 2：取得 Web App 設定
-1. 專案設定（齒輪圖示）→ 新增 Web 應用程式（`</>`）
-2. 輸入應用程式名稱 → 註冊 → 複製 `firebaseConfig` 物件
+專案設定（齒輪）→ 新增 Web 應用程式（`</>`）→ 註冊 → 複製 `firebaseConfig`
 
-### Step 3：在 Vercel 加入環境變數
-前往 Vercel 專案 → Settings → Environment Variables，加入以下 6 個：
-
-| 變數名稱 | 對應 firebaseConfig 欄位 |
-|---------|------------------------|
-| `VITE_FIREBASE_API_KEY` | `apiKey` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `authDomain` |
-| `VITE_FIREBASE_PROJECT_ID` | `projectId` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `storageBucket` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `messagingSenderId` |
-| `VITE_FIREBASE_APP_ID` | `appId` |
-
-加完後 Redeploy，Header 出現 **☁️ 雲端同步**（綠色）即成功。
-
-### Firestore 安全規則（測試完後建議更新）
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /scheduleApp/{docId} {
-      allow read, write: if true;
-    }
-  }
-}
-```
+### Step 3：在 Vercel 加入 6 個環境變數
+Settings → Environment Variables：`VITE_FIREBASE_API_KEY`（apiKey）、
+`VITE_FIREBASE_AUTH_DOMAIN`（authDomain）、`VITE_FIREBASE_PROJECT_ID`（projectId）、
+`VITE_FIREBASE_STORAGE_BUCKET`（storageBucket）、
+`VITE_FIREBASE_MESSAGING_SENDER_ID`（messagingSenderId）、`VITE_FIREBASE_APP_ID`（appId）。
+加完 Redeploy，Header 出現 **☁️ 雲端同步**（綠色）即成功。
 
 ---
 
@@ -150,47 +110,37 @@ service cloud.firestore {
 
 ### 首次部署
 1. Fork https://github.com/kukocliao/OTscheduleV3 到自己的 GitHub
-2. 前往 https://vercel.com → New Project → Import 你 fork 的 repo
+2. https://vercel.com → New Project → Import 該 repo
 3. Framework 選 **Vite**，其餘預設 → Deploy
-4. 完成後加入 Firebase 環境變數（見上方）
+4. 需要雲端同步再加 Firebase 環境變數（見第 4 節）
 
-### 更新程式碼後重新部署
-修改程式碼後，push 到 GitHub，Vercel 會自動重新部署。
-
-若要手動 push（無密碼），使用 Personal Access Token：
-1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. 勾選 `repo` → 生成 token
-3. 執行：
-```bash
-git remote set-url origin https://<你的GitHub帳號>:<token>@github.com/<你的帳號>/OTscheduleV3.git
-git push origin main
-git remote set-url origin https://github.com/<你的帳號>/OTscheduleV3.git  # 移除 token
-```
+### 更新後重新部署
+push 到 GitHub，Vercel 自動重新部署。push 認證優先用現成管道：
+Claude Code 的 GitHub 整合、`gh auth login`、或 GitHub Desktop。
+避免把 token 寫進 remote URL（會留在設定檔與 shell 歷史）。
 
 ---
 
 ## 6. 常見問題
 
-**Q: 改了 `data.ts` 的治療師，舊的排班資料會消失嗎？**  
-A: 不會。治療師資料儲存在 localStorage 和 Firestore，`data.ts` 只是初始預設值。若要套用新治療師，需在後台手動新增或清空資料。
+**Q: 改了 `data.ts` 的治療師，舊的排班資料會消失嗎？**
+A: 不會，但反過來也一樣——改 `data.ts` 不會影響使用中的系統
+（資料在 localStorage/Firestore）。要改生效中的治療師，用後台 UI（第 1 節）。
 
-**Q: 沒有設定 Firebase 也能用嗎？**  
-A: 可以。系統會自動退到「分頁同步」模式（同一瀏覽器的不同分頁可以同步），但不同裝置無法共用資料。
+**Q: 沒有設定 Firebase 也能用嗎？**
+A: 可以，資料存在瀏覽器 localStorage，單機完整可用；只是不同裝置無法共用資料。
 
-**Q: 治療師代號（code）有格式限制嗎？**  
-A: 無限制，但建議簡短（2-3 字元），因為會顯示在排班格上。
-
-**Q: 可以增加超過 5 位治療師嗎？**  
-A: 可以。id 依序新增（`t6`, `t7`...），並更新 `ROTATION_SEQUENCES`。
+**Q: 可以增加超過 5 位治療師嗎？**
+A: 可以，後台直接新增，再到「輪替序列設定」把新 id 加入各佇列。
 
 ---
 
-## Claude 引導使用者的流程
+## Claude 引導使用者的流程（以「幫我改治療師」為例）
 
-當使用者說「幫我改治療師」時，依序：
-1. 先讀 `src/data.ts` 確認目前治療師清單
-2. 詢問使用者：新治療師的姓名、代號、顏色偏好
-3. 修改 `initialTherapists` 陣列
-4. 詢問這位治療師要加入哪些輪替序列（上午/下午/副木）
-5. 修改 `App.tsx` 的 `ROTATION_SEQUENCES`
-6. 提醒使用者 push 到 GitHub 並 Redeploy
+1. 先問一句：系統是否已在使用中（有排班資料）？
+2. **使用中** → 引導後台操作：後台 → 治療師資料管理 → 新增/修改
+   → 再到「輪替序列設定」加入輪替 → 完成，不需改程式碼、不需重新部署。
+3. **全新部署前** → 改 `src/data.ts` 的 `initialTherapists` ＋
+   `src/App.tsx:39` 的 `DEFAULT_ROTATION_SEQUENCES`，
+   然後跑 `npm run lint`、`npm run build`，push 後 Vercel 自動部署。
+4. 涉及類別／演算法／優先序的要求 → 先確認是院方政策還是工程問題，政策要問使用者。
