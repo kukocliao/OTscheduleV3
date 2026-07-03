@@ -39,6 +39,8 @@
 以下屬「事實」非「制度」，發現與現實不符就直接更新＋在 commit message 註明證據：
 - codebase-map.md 的行號與結構
 - 01-dispatch.md 第 2 節的型號清單（以新 session 的 system-reminder 實際清單為準）
+- 01-dispatch.md 第 7 節的定價數字（以官方 pricing 頁或 claude-api skill 定價表為準，
+  改數字時附查證日期與來源；「調度含義」的文字屬制度，要動仍需先問）
 - 00-diagnosis.md 查證紀錄中的行數、指令
 
 原則：**制度（該怎麼做）要問，事實（現在是什麼）直接修。**
