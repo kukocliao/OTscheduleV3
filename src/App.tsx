@@ -2569,6 +2569,7 @@ export default function App() {
             <div className="p-3 bg-indigo-50 rounded-full text-indigo-600">
               <Lock className="w-8 h-8" />
             </div>
+            <p className="text-xs font-bold text-indigo-600 tracking-widest">台大雲林分院</p>
             <h2 className="text-lg font-extrabold text-slate-800">職能治療排程管理系統</h2>
             <p className="text-xs text-slate-500">
               {appUsers.length > 0 ? '請選擇使用者並輸入密碼' : sitePassword ? '請輸入密碼以進入系統' : '首次使用，請設定系統密碼'}
